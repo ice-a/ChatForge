@@ -1,0 +1,36 @@
+{
+  "name": "chatforge",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "ChatForge · 会话锻造厂 —— 提取本地 AI 工具会话，锻造用户画像 / 智能体记忆 / 可分享 Skill（Tauri 2 全平台）",
+  "scripts": {
+    "dev": "vite",
+    "dev:bridge": "node scripts/dev-bridge.mjs",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "icons": "node scripts/gen-icons.mjs"
+  },
+  "dependencies": {
+    "@ant-design/icons": "^5.6.1",
+    "@tauri-apps/api": "^2.5.0",
+    "antd": "^5.26.0",
+    "dayjs": "^1.11.13",
+    "echarts": "^5.6.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "zustand": "^5.0.5"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.5.0",
+    "@types/react": "^18.3.20",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.5.0",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5"
+  }
+}
