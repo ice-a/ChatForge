@@ -1,5 +1,5 @@
 import { fsListDir, fsReadFile, pathJoin } from '../bridge/client';
-import type { ParsedMessage, ParsedSession, ScanResult, ToolAdapter } from '../types';
+import type { AdapterContext, ParsedMessage, ParsedSession, ScanResult, ToolAdapter } from '../types';
 import {
   listFiles,
   normalizeContent,
@@ -14,8 +14,12 @@ import {
   parseClaudeJsonl,
   parseCodebuddyHistory,
   parseCodexJsonl,
+  parseCursorRows,
+  parseAiderMarkdown,
   parseGeminiJson,
   parseOpencodeStorage,
+  parseRooUiMessages,
+  parseVSCodeChatJsonl,
   parseZcodeRows,
 } from './parsers';
 
@@ -436,9 +440,224 @@ const cherrystudio: ToolAdapter = {
   },
 };
 
+// ============ VSCode 系通用：chatSessions 扫描 + state.vscdb aichat/composer ============
+
+/** VSCode 系编辑器的 User 目录（多平台） */
+function vscodeUserDirs(ctx: AdapterContext, editors: string[]): string[] {
+  const out: string[] = [];
+  for (const e of editors) {
+    out.push(
+      ctx.homeDir + `/AppData/Roaming/${e}/User`,
+      ctx.homeDir + `/Library/Application Support/${e}/User`,
+      ctx.homeDir + `/.config/${e}/User`,
+    );
+  }
+  return out;
+}
+
+/** 扫描 VSCode 系编辑器的 chatSessions/*.jsonl（Copilot Chat / 通用 chat provider） */
+async function scanChatSessionsJsonl(ctx: AdapterContext, editors: string[]): Promise<ScanResult> {
+  const sessions: ParsedSession[] = [];
+  const errors: string[] = [];
+  for (const userDir of vscodeUserDirs(ctx, editors)) {
+    for (const sub of ['workspaceStorage', 'globalStorage/emptyWindowChatSessions', 'globalStorage/windowChatSessions']) {
+      const files = await listFiles(`${userDir}/${sub}`, '.jsonl', 4, 3000);
+      for (const f of files) {
+        if (!f.path.includes('chatSessions') && !f.path.includes('ChatSessions')) continue;
+        try {
+          const s = parseVSCodeChatJsonl(await readFileText(f.path, 64 * 1024 * 1024), f.path, f.mtimeMs);
+          if (s) sessions.push(s);
+        } catch (e) {
+          errors.push(`${f.path}: ${(e as Error).message}`);
+        }
+      }
+    }
+  }
+  return { sessions, errors };
+}
+
+// ============ GitHub Copilot Chat（VSCode） ============
+
+const copilot: ToolAdapter = {
+  id: 'copilot',
+  label: 'Copilot Chat',
+  pathHint: 'VSCode workspaceStorage/*/chatSessions/*.jsonl + emptyWindowChatSessions',
+  defaultPaths: (ctx) => vscodeUserDirs(ctx, ['Code']),
+  async scan(ctx, customPaths) {
+    if (customPaths.length) {
+      const errors: string[] = [];
+      const sessions: ParsedSession[] = [];
+      for (const dir of customPaths) {
+        const files = await listFiles(dir, '.jsonl', 4, 3000);
+        for (const f of files) {
+          try {
+            const s = parseVSCodeChatJsonl(await readFileText(f.path, 64 * 1024 * 1024), f.path, f.mtimeMs);
+            if (s) sessions.push(s);
+          } catch (e) {
+            errors.push(`${f.path}: ${(e as Error).message}`);
+          }
+        }
+      }
+      return { sessions, errors };
+    }
+    return scanChatSessionsJsonl(ctx, ['Code']);
+  },
+};
+
+// ============ Cursor ============
+
+const cursor: ToolAdapter = {
+  id: 'cursor',
+  label: 'Cursor',
+  pathHint: 'Cursor User/globalStorage/state.vscdb（SQLite）+ chatSessions',
+  defaultPaths: (ctx) => [
+    ...vscodeUserDirs(ctx, ['Cursor']).map((u) => u + '/globalStorage/state.vscdb'),
+  ],
+  async scan(ctx, customPaths) {
+    const errors: string[] = [];
+    const sessions: ParsedSession[] = [];
+    // 1) state.vscdb（SQLite）
+    const dbs = customPaths.filter((p) => p.toLowerCase().endsWith('.vscdb'));
+    if (!dbs.length) dbs.push(...(await probePaths(cursor.defaultPaths(ctx))));
+    for (const dbPath of dbs) {
+      try {
+        const safe = async (key: string, sql: string) => {
+          try {
+            return (await querySqliteSafe(dbPath, ctx.homeDir, [{ key, sql }]))[key].rows;
+          } catch {
+            return [];
+          }
+        };
+        const itemtable = await safe(
+          'itemtable',
+          "SELECT key, value FROM ItemTable WHERE key = 'workbench.panel.aichat.view.aichat.chatdata'",
+        );
+        const composers = await safe('composers', "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'composerData:%' LIMIT 5000");
+        const bubbles = await safe('bubbles', "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'bubbleId:%' LIMIT 30000");
+        sessions.push(...parseCursorRows({ itemtable, composers, bubbles }));
+      } catch (e) {
+        errors.push(`${dbPath}: ${(e as Error).message}`);
+      }
+    }
+    // 2) Cursor 的 chatSessions 目录（若有）
+    const r = await scanChatSessionsJsonl(ctx, ['Cursor']);
+    sessions.push(...r.sessions);
+    errors.push(...r.errors);
+    return { sessions, errors };
+  },
+};
+
+// ============ Windsurf / Trae（VSCode 系，chatSessions 优先 + state.vscdb 旧版） ============
+
+function vscodeFamilyAdapter(id: string, label: string, editors: string[], hint: string): ToolAdapter {
+  return {
+    id,
+    label,
+    pathHint: hint,
+    defaultPaths: (ctx) => vscodeUserDirs(ctx, editors),
+    async scan(ctx, customPaths) {
+      const errors: string[] = [];
+      const sessions: ParsedSession[] = [];
+      if (customPaths.length) {
+        const r = await scanJsonlDirs(customPaths, parseVSCodeChatJsonl);
+        sessions.push(...r.sessions);
+        errors.push(...r.errors);
+        return { sessions, errors };
+      }
+      const r = await scanChatSessionsJsonl(ctx, editors);
+      sessions.push(...r.sessions);
+      errors.push(...r.errors);
+      // 旧版面板聊天存于 state.vscdb 的 aichat key
+      for (const dbPath of (await probePaths(vscodeUserDirs(ctx, editors).map((u) => u + '/globalStorage/state.vscdb')))) {
+        try {
+          const res = await querySqliteSafe(dbPath, ctx.homeDir, [
+            { key: 'itemtable', sql: "SELECT key, value FROM ItemTable WHERE key = 'workbench.panel.aichat.view.aichat.chatdata'" },
+          ]);
+          sessions.push(...parseCursorRows({ itemtable: res.itemtable.rows, composers: [], bubbles: [] }));
+        } catch {
+          /* 表不存在则跳过 */
+        }
+      }
+      return { sessions, errors };
+    },
+  };
+}
+
+const windsurf = vscodeFamilyAdapter(
+  'windsurf',
+  'Windsurf',
+  ['Windsurf'],
+  'Windsurf User/workspaceStorage/*/chatSessions/*.jsonl + state.vscdb',
+);
+const trae = vscodeFamilyAdapter(
+  'trae',
+  'Trae',
+  ['Trae CN', 'Trae'],
+  'Trae User/workspaceStorage/*/chatSessions/*.jsonl + state.vscdb',
+);
+
+// ============ Roo Code（VSCode 扩展任务目录） ============
+
+const roo: ToolAdapter = {
+  id: 'roo',
+  label: 'Roo Code',
+  pathHint: 'VSCode globalStorage/rooveterinaryinc.roo-cline/tasks/*/ui_messages.json',
+  defaultPaths: (ctx) => [
+    ctx.homeDir + '/AppData/Roaming/Code/User/globalStorage/rooveterinaryinc.roo-cline/tasks',
+    ctx.homeDir + '/Library/Application Support/Code/User/globalStorage/rooveterinaryinc.roo-cline/tasks',
+    ctx.homeDir + '/.config/Code/User/globalStorage/rooveterinaryinc.roo-cline/tasks',
+  ],
+  async scan(ctx, customPaths) {
+    const errors: string[] = [];
+    const sessions: ParsedSession[] = [];
+    const dirs = customPaths.length ? customPaths : await probePaths(roo.defaultPaths(ctx));
+    for (const dir of dirs) {
+      const files = await listFiles(dir, '.json', 3, 3000);
+      for (const f of files) {
+        if (!f.path.endsWith('ui_messages.json')) continue;
+        try {
+          const s = parseRooUiMessages(await readFileText(f.path, 64 * 1024 * 1024), f.path, f.mtimeMs);
+          if (s) sessions.push(s);
+        } catch (e) {
+          errors.push(`${f.path}: ${(e as Error).message}`);
+        }
+      }
+    }
+    return { sessions, errors };
+  },
+};
+
+// ============ Aider（Markdown 会话历史） ============
+
+const aider: ToolAdapter = {
+  id: 'aider',
+  label: 'Aider',
+  pathHint: '~/.aider.chat.history.md（也可指向项目里的 .aider.chat.history.md）',
+  defaultPaths: (ctx) => [
+    ctx.homeDir + '/.aider.chat.history.md',
+    ctx.homeDir + '/.aider.chat.history',
+  ],
+  async scan(ctx, customPaths) {
+    const errors: string[] = [];
+    const sessions: ParsedSession[] = [];
+    const files = customPaths.length ? customPaths : await probePaths(aider.defaultPaths(ctx));
+    for (const f of files) {
+      try {
+        const s = parseAiderMarkdown(await readFileText(f, 64 * 1024 * 1024), f);
+        if (s) sessions.push(s);
+      } catch (e) {
+        errors.push(`${f}: ${(e as Error).message}`);
+      }
+    }
+    return { sessions, errors };
+  },
+};
+
 // ============ 注册表 ============
 
-export const BUILTIN_ADAPTERS: ToolAdapter[] = [zcode, claude, codex, opencode, gemini, qwen, cline, codebuddy, cherrystudio, pi, mimo, dsh];
+export const BUILTIN_ADAPTERS: ToolAdapter[] = [
+  zcode, claude, codex, copilot, cursor, windsurf, trae, opencode, gemini, qwen, cline, roo, codebuddy, cherrystudio, aider, pi, mimo, dsh,
+];
 
 export function getAdapter(id: string): ToolAdapter | undefined {
   return BUILTIN_ADAPTERS.find((a) => a.id === id);

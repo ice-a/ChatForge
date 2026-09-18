@@ -413,6 +413,245 @@ function mtimeOf(messages: ParsedMessage[]): number {
   return messages.reduce((acc, m) => Math.max(acc, m.ts ?? 0), 0);
 }
 
+// ============ VSCode 系聊天（Copilot Chat / Cursor / Windsurf / Trae 的 chatSessions/*.jsonl） ============
+
+/** VSCode chat 会话导出：第一行 {kind:0, v:{sessionId, creationDate, requests:[...]}}，后续行为增量更新 */
+export function parseVSCodeChatJsonl(text: string, filePath: string, mtimeMs = 0): ParsedSession | null {
+  const first = text.split('\n').find((l) => l.trim().startsWith('{'));
+  if (!first) return null;
+  let v: Record<string, unknown>;
+  try {
+    const o = JSON.parse(first) as { kind?: number; v?: Record<string, unknown> };
+    if (o.kind !== 0 || !o.v) return null;
+    v = o.v;
+  } catch {
+    return null;
+  }
+  const requests = v.requests as Record<string, unknown>[] | undefined;
+  if (!Array.isArray(requests) || !requests.length) return null;
+
+  const vscodeText = (x: unknown): string => {
+    if (!x) return '';
+    if (typeof x === 'string') return x;
+    if (Array.isArray(x)) return x.map(vscodeText).filter(Boolean).join('\n');
+    const o = x as Record<string, unknown>;
+    if (typeof o.value === 'string') return o.value; // MarkdownString {value}
+    if (typeof o.text === 'string') return o.text;
+    return normalizeContent(o.parts ?? o.content ?? o.text);
+  };
+
+  const messages: ParsedMessage[] = [];
+  const modelMeta = ((v.inputState as Record<string, unknown> | undefined)?.selectedModel ?? undefined) as
+    | Record<string, unknown>
+    | undefined;
+  const modelName =
+    (((modelMeta?.metadata as Record<string, unknown> | undefined)?.name as string) || (modelMeta?.name as string) || undefined);
+  for (const r of requests) {
+    const ts = extractTs(r.timestamp ?? r.createdAt);
+    const userText = vscodeText((r.message as Record<string, unknown>)?.parts ?? (r.message as Record<string, unknown>)?.content ?? (r.message as Record<string, unknown>)?.text);
+    if (userText) messages.push({ role: 'user', content: userText, ts });
+    const respText = vscodeText(r.response);
+    if (respText) messages.push({ role: 'assistant', content: respText, ts, model: modelName });
+  }
+  if (!messages.length) return null;
+  const firstUser = messages.find((m) => m.role === 'user')?.content ?? '';
+  const created = extractTs(v.creationDate) ?? mtimeMs;
+  return {
+    nativeId: (v.sessionId as string) || filePath,
+    title: truncateTitle(firstUser),
+    model: modelName,
+    createdAt: created,
+    updatedAt: mtimeOf(messages) || created,
+    messages,
+    sourcePath: filePath,
+  };
+}
+
+// ============ Aider（~/.aider.chat.history.md 等 Markdown 历史） ============
+
+export function parseAiderMarkdown(text: string, filePath: string, mtimeMs = 0): ParsedSession | null {
+  const messages: ParsedMessage[] = [];
+  let startedAt: number | undefined;
+  let buf: { role: 'user' | 'assistant'; lines: string[] } | null = null;
+
+  const flush = () => {
+    if (!buf) return;
+    const content = buf.lines.join('\n').trim();
+    if (content) messages.push({ role: buf.role, content });
+    buf = null;
+  };
+
+  for (const line of text.split('\n')) {
+    const m = line.match(/^#\s*Aider chat (?:started|resumed) at\s+(.+)$/i);
+    if (m) {
+      flush();
+      const t = Date.parse(m[1]);
+      if (!Number.isNaN(t)) startedAt = startedAt ?? t;
+      continue;
+    }
+    const quote = line.match(/^>\s?(.*)$/);
+    if (quote) {
+      if (!buf || buf.role !== 'user') {
+        flush();
+        buf = { role: 'user', lines: [] };
+      }
+      buf.lines.push(quote[1]);
+      continue;
+    }
+    if (line.trim()) {
+      if (!buf || buf.role !== 'assistant') {
+        flush();
+        buf = { role: 'assistant', lines: [] };
+      }
+      buf.lines.push(line.replace(/^##+\s*/, ''));
+    } else if (buf?.role === 'user') {
+      flush();
+    }
+  }
+  flush();
+  if (!messages.length) return null;
+  return {
+    nativeId: filePath,
+    title: truncateTitle(messages.find((m) => m.role === 'user')?.content ?? filePath),
+    createdAt: startedAt ?? mtimeMs,
+    updatedAt: mtimeMs,
+    messages,
+    sourcePath: filePath,
+  };
+}
+
+// ============ Cursor（state.vscdb：ItemTable 旧版 chatdata + cursorDiskKV composerData） ============
+
+export interface CursorDbRows {
+  itemtable: Record<string, unknown>[];
+  composers: Record<string, unknown>[];
+  bubbles: Record<string, unknown>[];
+}
+
+export function parseCursorRows(rows: CursorDbRows): ParsedSession[] {
+  const out: ParsedSession[] = [];
+
+  // 旧版：ItemTable 的 chatdata JSON
+  for (const row of rows.itemtable) {
+    try {
+      const data = JSON.parse(String(row.value ?? '{}')) as {
+        tabs?: { tabId?: string; chatMessages?: Record<string, unknown>[] }[];
+      };
+      for (const tab of data.tabs ?? []) {
+        const messages: ParsedMessage[] = [];
+        for (const m of tab.chatMessages ?? []) {
+          const type = m.type as string;
+          const role = type === 'user' ? 'user' : type === 'ai' || type === 'assistant' ? 'assistant' : '';
+          const content = normalizeContent(m.content ?? m.text ?? m.richMessage);
+          if (!role || !content) continue;
+          messages.push({ role, content, ts: extractTs(m.timestamp) });
+        }
+        if (messages.length >= 2) {
+          out.push({
+            nativeId: `legacy:${tab.tabId ?? out.length}`,
+            title: truncateTitle(messages[0].content),
+            createdAt: (messages[0].ts ?? 0) || 0,
+            updatedAt: mtimeOf(messages),
+            messages,
+            sourcePath: 'cursor:state.vscdb',
+          });
+        }
+      }
+    } catch {
+      /* 跳过坏数据 */
+    }
+  }
+
+  // 新版：cursorDiskKV composerData:<id>（conversation 或 bubbleId 引用）
+  const bubbleById = new Map<string, { role: string; text: string; ts?: number }>();
+  for (const b of rows.bubbles) {
+    try {
+      const key = String(b.key ?? '');
+      const v = JSON.parse(String(b.value ?? '{}')) as Record<string, unknown>;
+      const role: string = v.type === 'user' ? 'user' : v.type === 'ai' ? 'assistant' : '';
+      const text = normalizeContent(v.text ?? v.richText);
+      if (role && text) bubbleById.set(key, { role, text, ts: extractTs(v.timestamp ?? v.createdAt) });
+    } catch {
+      /* ignore */
+    }
+  }
+  for (const c of rows.composers) {
+    try {
+      const key = String(c.key ?? '');
+      const v = JSON.parse(String(c.value ?? '{}')) as Record<string, unknown>;
+      const messages: ParsedMessage[] = [];
+      const conv = v.conversation as Record<string, unknown> | unknown[] | undefined;
+      const convEntries: Record<string, unknown>[] = Array.isArray(conv)
+        ? (conv as Record<string, unknown>[])
+        : conv && typeof conv === 'object'
+          ? (Object.values(conv) as Record<string, unknown>[])
+          : [];
+      for (const m of convEntries) {
+        const role = m.type === 'user' ? 'user' : m.type === 'ai' ? 'assistant' : '';
+        const text = normalizeContent(m.text ?? m.richText);
+        if (role && text) messages.push({ role: role as ParsedMessage['role'], content: text, ts: extractTs(m.timestamp ?? m.createdAt) });
+        // bubbleId 引用型：从 bubbles 表取
+        const bid = m.bubbleId as string | undefined;
+        if (bid) {
+          const b = bubbleById.get(`bubbleId:${v.composerId ?? key.slice('composerData:'.length)}:${bid}`) ?? bubbleById.get(bid);
+          if (b) messages.push({ role: b.role as ParsedMessage['role'], content: b.text, ts: b.ts });
+        }
+      }
+      // conversation 为空时直接按 composer 的 bubbleId 顺序取
+      if (!messages.length && bubbleById.size) {
+        const prefix = `bubbleId:${v.composerId ?? key.slice('composerData:'.length)}:`;
+        const related = [...bubbleById.entries()]
+          .filter(([k]) => k.startsWith(prefix))
+          .sort((a, b) => (a[1].ts ?? 0) - (b[1].ts ?? 0));
+        for (const [, b] of related) messages.push({ role: b.role as ParsedMessage['role'], content: b.text, ts: b.ts });
+      }
+      if (messages.length >= 2) {
+        const created = extractTs(v.createdAt) ?? (messages[0].ts ?? 0);
+        out.push({
+          nativeId: `composer:${v.composerId ?? key}`,
+          title: truncateTitle(String(v.name ?? '') || messages.find((m) => m.role === 'user')!.content),
+          createdAt: created,
+          updatedAt: mtimeOf(messages) || created,
+          messages,
+          sourcePath: 'cursor:state.vscdb',
+        });
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  return out;
+}
+
+// ============ Roo Code（globalStorage/rooveterinaryinc.roo-cline/tasks/*/ui_messages.json） ============
+
+export function parseRooUiMessages(text: string, filePath: string, mtimeMs = 0): ParsedSession | null {
+  let arr: Record<string, unknown>[];
+  try {
+    arr = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(arr)) return null;
+  const messages: ParsedMessage[] = [];
+  for (const m of arr) {
+    if (m.type !== 'say') continue;
+    const text2 = String(m.text ?? '');
+    if (!text2.trim()) continue;
+    if (m.say === 'user_message') messages.push({ role: 'user', content: text2, ts: extractTs(m.ts) });
+    else if (m.say === 'text') messages.push({ role: 'assistant', content: text2, ts: extractTs(m.ts) });
+  }
+  if (!messages.length) return null;
+  return {
+    nativeId: `roo:${filePath}`,
+    title: truncateTitle(messages.find((m) => m.role === 'user')?.content ?? filePath),
+    createdAt: (messages[0].ts ?? 0) || mtimeMs,
+    updatedAt: mtimeOf(messages) || mtimeMs,
+    messages,
+    sourcePath: filePath,
+  };
+}
+
 // ============ CodeBuddy  (~/.codebuddy/history.jsonl，用户输入历史) ============
 
 interface CodebuddyHistoryLine {
