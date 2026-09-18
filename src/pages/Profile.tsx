@@ -24,6 +24,7 @@ import {
   DownloadOutlined,
   EditOutlined,
   FileTextOutlined,
+  PictureOutlined,
   PlusOutlined,
   RobotOutlined,
   ThunderboltOutlined,
@@ -33,6 +34,7 @@ import { useAppStore } from '../store';
 import { generateProfileWithLLM, generateRuleProfile, loadLlmConfig, loadProfile } from '../lib/profile';
 import { exportText, profileToAgentsMd, profileToMarkdown } from '../lib/export';
 import { initDb, saveProfile } from '../lib/db';
+import { collectShareData, exportShareCard } from '../lib/sharecard';
 import type { UserProfile } from '../types';
 import dayjs from 'dayjs';
 
@@ -151,6 +153,16 @@ export default function Profile() {
       message.success(`已导出：${path}`);
     } catch (e) {
       message.error((e as Error).message);
+    }
+  };
+
+  const doShareCard = async () => {
+    try {
+      const data = await collectShareData(homeDir, profile!.profile);
+      const file = await exportShareCard(homeDir, data);
+      message.success(`分享卡片已生成并开始下载（${file}）`);
+    } catch (e) {
+      message.error(`生成失败：${(e as Error).message}`);
     }
   };
 
@@ -323,6 +335,7 @@ export default function Profile() {
 
       <Card size="small" title="导出">
         <Space wrap>
+          <Button icon={<PictureOutlined />} type="primary" ghost onClick={() => void doShareCard()}>生成分享卡片</Button>
           <Button icon={<DownloadOutlined />} onClick={() => void doExport('md')}>画像 Markdown</Button>
           <Button icon={<DownloadOutlined />} onClick={() => void doExport('json')}>画像 JSON</Button>
           <Button icon={<FileTextOutlined />} onClick={() => void doExport('agents')}>AGENTS.md</Button>
