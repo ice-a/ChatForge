@@ -1,5 +1,6 @@
 import { fsListDir, fsWriteFile, pathJoin } from '../bridge/client';
 import type { ModelUsage, ToolSummary } from './db';
+import { estimateCost, type ModelPrice } from './prices';
 import type { UserProfile } from '../types';
 import dayjs from 'dayjs';
 
@@ -103,10 +104,27 @@ export function profileToAgentsMd(p: UserProfile): string {
   return lines.join('\n');
 }
 
-export function usageToCsv(rows: ModelUsage[]): string {
-  const head = '工具,模型,会话数,消息数,输入Token,输出Token,最近活跃';
+export function usageToCsv(rows: ModelUsage[], prices?: ModelPrice[]): string {
+  const head = prices
+    ? '工具,模型,会话数,消息数,输入Token,输出Token,估算成本USD,最近活跃'
+    : '工具,模型,会话数,消息数,输入Token,输出Token,最近活跃';
   const body = rows
-    .map((r) => [r.tool, `"${String(r.model).replace(/"/g, '""')}"`, r.sessions, r.msgs, r.tokens_in, r.tokens_out, dayjs(r.last_active).format('YYYY-MM-DD HH:mm')].join(','))
+    .map((r) => {
+      const cells: (string | number)[] = [
+        r.tool,
+        `"${String(r.model).replace(/"/g, '""')}"`,
+        r.sessions,
+        r.msgs,
+        r.tokens_in,
+        r.tokens_out,
+      ];
+      if (prices) {
+        const c = estimateCost(r.model, Number(r.tokens_in ?? 0), Number(r.tokens_out ?? 0), prices);
+        cells.push(c !== null ? c.toFixed(4) : '');
+      }
+      cells.push(dayjs(r.last_active).format('YYYY-MM-DD HH:mm'));
+      return cells.join(',');
+    })
     .join('\n');
   return '\uFEFF' + head + '\n' + body;
 }

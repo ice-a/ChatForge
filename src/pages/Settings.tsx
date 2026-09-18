@@ -12,6 +12,7 @@ import {
   Slider,
   Space,
   Switch,
+  Table,
   Tag,
   Typography,
 } from 'antd';
@@ -22,6 +23,7 @@ import { getCustomSources, getLastScanReport, getSourceStatuses, runScan, saveCu
 import { saveLlmConfig, loadLlmConfig } from '../lib/profile';
 import { testLLM, LLM_PRESETS } from '../lib/llm';
 import { clearAllData, getHubPath, initDb, saveSetting } from '../lib/db';
+import { DEFAULT_PRICES, loadPrices, savePrices, type ModelPrice } from '../lib/prices';
 import { exportText } from '../lib/export';
 import type { CustomSource, LlmConfig } from '../types';
 import dayjs from 'dayjs';
@@ -37,6 +39,7 @@ export default function Settings() {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [newSource, setNewSource] = useState<CustomSource>({ id: '', name: '', path: '', format: 'chat-jsonl' });
+  const [priceRows, setPriceRows] = useState<ModelPrice[]>([]);
   const [llmForm] = Form.useForm<LlmConfig>();
 
   const load = useCallback(async () => {
@@ -48,6 +51,7 @@ export default function Settings() {
       setCustomSources(await getCustomSources(homeDir));
       setLastScan(await getLastScanReport(homeDir));
       setHubPath(await getHubPath(homeDir));
+      setPriceRows(await loadPrices(homeDir));
       const cfg = await loadLlmConfig(homeDir);
       if (cfg) llmForm.setFieldsValue(cfg);
       else llmForm.setFieldsValue({ protocol: 'openai', baseUrl: '', apiKey: '', model: '', temperature: 0.4 });
@@ -279,6 +283,57 @@ export default function Settings() {
             message={testResult.message}
           />
         )}
+      </Card>
+
+      <Card size="small" title="模型价格表（成本估算用，$/1M tokens）">
+        <Alert type="info" showIcon style={{ marginBottom: 12 }} message="按模型名关键词双向包含匹配（如填 deepseek-chat 可命中 deepseek-chat）。单价填公开牌价，未命中的模型在统计中显示为「—」。价格为近似值，请以服务商实际账单为准。" />
+        <div style={{ maxHeight: 320, overflow: 'auto' }}>
+          <Table<ModelPrice>
+            size="small"
+            rowKey={(r, i) => `${r.key}-${i}`}
+            dataSource={priceRows}
+            pagination={false}
+            columns={[
+              {
+                title: '模型关键词',
+                dataIndex: 'key',
+                width: '45%',
+                render: (v: string, _r, i) => (
+                  <Input size="small" value={v} onChange={(e) => setPriceRows(priceRows.map((p, j) => (j === i ? { ...p, key: e.target.value } : p)))} />
+                ),
+              },
+              {
+                title: '输入 $/1M',
+                dataIndex: 'input',
+                width: '20%',
+                render: (v: number, _r, i) => (
+                  <Input size="small" type="number" step="0.01" value={v} onChange={(e) => setPriceRows(priceRows.map((p, j) => (j === i ? { ...p, input: Number(e.target.value) } : p)))} />
+                ),
+              },
+              {
+                title: '输出 $/1M',
+                dataIndex: 'output',
+                width: '20%',
+                render: (v: number, _r, i) => (
+                  <Input size="small" type="number" step="0.01" value={v} onChange={(e) => setPriceRows(priceRows.map((p, j) => (j === i ? { ...p, output: Number(e.target.value) } : p)))} />
+                ),
+              },
+              {
+                title: '',
+                key: 'del',
+                width: 50,
+                render: (_: unknown, _r, i) => (
+                  <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => setPriceRows(priceRows.filter((_, j) => j !== i))} />
+                ),
+              },
+            ]}
+          />
+        </div>
+        <Space style={{ marginTop: 12 }}>
+          <Button size="small" icon={<PlusOutlined />} onClick={() => setPriceRows([...priceRows, { key: '', input: 0, output: 0 }])}>添加模型</Button>
+          <Button size="small" type="primary" onClick={async () => { await savePrices(homeDir, priceRows.filter((p) => p.key.trim())); message.success('价格表已保存'); }}>保存价格表</Button>
+          <Button size="small" onClick={async () => { setPriceRows(DEFAULT_PRICES); await savePrices(homeDir, DEFAULT_PRICES); message.success('已恢复默认价格表'); }}>恢复默认</Button>
+        </Space>
       </Card>
 
       <Card size="small" title="数据管理">

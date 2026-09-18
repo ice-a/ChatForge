@@ -1,4 +1,5 @@
 import { BUILTIN_ADAPTERS, buildCustomAdapter, probePaths } from '../adapters/registry';
+import { rebuildFts } from './fts';
 import { getSettings, initDb, saveSetting, upsertSessions, type SessionFilter } from './db';
 import type { CustomSource, ScanReportItem } from '../types';
 
@@ -107,6 +108,14 @@ export async function runScan(
 
   await saveSetting(db, 'last_scan_at', String(Date.now()));
   await saveSetting(db, 'last_scan_report', JSON.stringify(report));
+  // 有会话入库时重建全文索引
+  if (report.some((r) => r.sessions > 0)) {
+    try {
+      await rebuildFts(db);
+    } catch {
+      /* 索引失败不影响扫描结果 */
+    }
+  }
   return report;
 }
 

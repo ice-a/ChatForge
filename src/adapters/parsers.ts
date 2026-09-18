@@ -412,3 +412,145 @@ export function parseOpencodeStorage(
 function mtimeOf(messages: ParsedMessage[]): number {
   return messages.reduce((acc, m) => Math.max(acc, m.ts ?? 0), 0);
 }
+
+// ============ CodeBuddy  (~/.codebuddy/history.jsonl，用户输入历史) ============
+
+interface CodebuddyHistoryLine {
+  display?: string;
+  timestamp?: number;
+  project?: string;
+}
+
+export function parseCodebuddyHistory(text: string, filePath: string): ParsedSession[] {
+  const byProject = new Map<string, { display: string; ts: number }[]>();
+  for (const line of text.split('\n')) {
+    const s = line.trim();
+    if (!s) continue;
+    let o: CodebuddyHistoryLine;
+    try {
+      o = JSON.parse(s);
+    } catch {
+      continue;
+    }
+    const display = (o.display ?? '').trim();
+    if (!display || display.startsWith('/')) continue; // 跳过斜杠命令
+    const project = o.project || '(未知项目)';
+    const arr = byProject.get(project) ?? [];
+    arr.push({ display, ts: Number(o.timestamp ?? 0) });
+    byProject.set(project, arr);
+  }
+  const out: ParsedSession[] = [];
+  for (const [project, inputs] of byProject) {
+    inputs.sort((a, b) => a.ts - b.ts);
+    out.push({
+      nativeId: `input-history:${project}`,
+      title: truncateTitle(`CodeBuddy 输入历史 · ${projectFromPath(project) ?? project}`, 80),
+      project: projectFromPath(project),
+      createdAt: inputs[0]?.ts || 0,
+      updatedAt: inputs[inputs.length - 1]?.ts || 0,
+      messages: inputs.map((i) => ({ role: 'user' as const, content: i.display, ts: i.ts })),
+      sourcePath: filePath,
+    });
+  }
+  return out;
+}
+
+// ============ CherryStudio  (AppData/Roaming/CherryStudio/Data/cherrystudio.sqlite) ============
+
+export interface CherryRowTables {
+  topics: Record<string, unknown>[];
+  messages: Record<string, unknown>[];
+  agent_sessions?: Record<string, unknown>[];
+  agent_messages?: Record<string, unknown>[];
+  models?: Record<string, unknown>[];
+}
+
+/** CherryStudio message.data = {"parts":[{"type":"text","text":...}]}；空时退回 searchable_text */
+function cherryContent(data: unknown, searchable: unknown): string {
+  try {
+    const o = JSON.parse(String(data ?? '{}')) as { parts?: { type?: string; text?: string }[] };
+    const texts = (o.parts ?? [])
+      .filter((p) => (p.type ?? 'text') === 'text' && p.text)
+      .map((p) => p.text as string);
+    if (texts.length) return texts.join('\n');
+  } catch {
+    /* fallthrough */
+  }
+  return String(searchable ?? '');
+}
+
+export function parseCherryRows(tables: CherryRowTables): ParsedSession[] {
+  const modelNames = new Map<string, string>();
+  for (const m of tables.models ?? []) {
+    if (m.id && m.name) modelNames.set(String(m.id), String(m.name));
+  }
+
+  const build = (
+    sessionId: string,
+    meta: { title?: string; createdAt?: number; updatedAt?: number } | undefined,
+    msgs: Record<string, unknown>[],
+    sourcePath: string,
+  ): ParsedSession | null => {
+    const parsed: ParsedMessage[] = [];
+    for (const m of msgs) {
+      const role = String(m.role ?? '');
+      if (role !== 'user' && role !== 'assistant') continue;
+      const content = cherryContent(m.data, m.searchable_text);
+      if (!content.trim()) continue;
+      const modelId = m.model_id ? String(m.model_id) : undefined;
+      parsed.push({
+        role,
+        content,
+        ts: Number(m.created_at ?? 0) || undefined,
+        model: role === 'assistant' ? (modelId ? modelNames.get(modelId) ?? modelId.split('::').pop() : undefined) : undefined,
+      });
+    }
+    if (!parsed.length) return null;
+    const firstUser = parsed.find((m) => m.role === 'user')?.content ?? '';
+    return {
+      nativeId: sessionId,
+      title: truncateTitle(meta?.title || firstUser),
+      createdAt: meta?.createdAt ?? (parsed[0]?.ts ?? 0),
+      updatedAt: meta?.updatedAt ?? mtimeOf(parsed),
+      messages: parsed,
+      sourcePath,
+      model: parsed.find((m) => m.role === 'assistant')?.model,
+    };
+  };
+
+  const out: ParsedSession[] = [];
+  const byTopic = new Map<string, Record<string, unknown>[]>();
+  for (const m of tables.messages) {
+    const tid = m.topic_id ? String(m.topic_id) : '';
+    if (!tid) continue;
+    (byTopic.get(tid) ?? byTopic.set(tid, []).get(tid)!).push(m);
+  }
+  for (const t of tables.topics) {
+    const tid = String(t.id ?? '');
+    const s = build(
+      tid,
+      { title: String(t.name ?? '') || undefined, createdAt: Number(t.created_at ?? 0), updatedAt: Number(t.updated_at ?? 0) },
+      byTopic.get(tid) ?? [],
+      'cherrystudio.sqlite',
+    );
+    if (s) out.push(s);
+  }
+
+  const byAgentSess = new Map<string, Record<string, unknown>[]>();
+  for (const m of tables.agent_messages ?? []) {
+    const sid = m.session_id ? String(m.session_id) : '';
+    if (!sid) continue;
+    (byAgentSess.get(sid) ?? byAgentSess.set(sid, []).get(sid)!).push(m);
+  }
+  for (const s0 of tables.agent_sessions ?? []) {
+    const sid = String(s0.id ?? '');
+    const s = build(
+      `agent:${sid}`,
+      { title: String(s0.name ?? '') || undefined, createdAt: Number(s0.created_at ?? 0), updatedAt: Number(s0.updated_at ?? 0) },
+      byAgentSess.get(sid) ?? [],
+      'cherrystudio.sqlite',
+    );
+    if (s) out.push(s);
+  }
+  return out;
+}

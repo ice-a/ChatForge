@@ -10,7 +10,9 @@ import {
 } from './scan';
 import {
   parseChatLoose,
+  parseCherryRows,
   parseClaudeJsonl,
+  parseCodebuddyHistory,
   parseCodexJsonl,
   parseGeminiJson,
   parseOpencodeStorage,
@@ -373,9 +375,70 @@ async function scanJsonlDirs(
   return { sessions, errors };
 }
 
+// ============ CodeBuddy（输入历史） ============
+
+const codebuddy: ToolAdapter = {
+  id: 'codebuddy',
+  label: 'CodeBuddy',
+  pathHint: '~/.codebuddy/history.jsonl（输入历史，按项目聚合）',
+  defaultPaths: (ctx) => [ctx.homeDir + '/.codebuddy/history.jsonl'],
+  async scan(ctx, customPaths) {
+    const errors: string[] = [];
+    const sessions: ParsedSession[] = [];
+    const files = customPaths.length ? customPaths : await probePaths(codebuddy.defaultPaths(ctx));
+    for (const f of files) {
+      try {
+        sessions.push(...parseCodebuddyHistory(await readFileText(f, 64 * 1024 * 1024), f));
+      } catch (e) {
+        errors.push(`${f}: ${(e as Error).message}`);
+      }
+    }
+    return { sessions, errors };
+  },
+};
+
+// ============ CherryStudio（聊天客户端 SQLite） ============
+
+const cherrystudio: ToolAdapter = {
+  id: 'cherrystudio',
+  label: 'CherryStudio',
+  pathHint: 'AppData/Roaming/CherryStudio/Data/cherrystudio.sqlite（Win）等（SQLite，聊天记录）',
+  defaultPaths: (ctx) => [
+    ctx.homeDir + '/AppData/Roaming/CherryStudio/Data/cherrystudio.sqlite',
+    ctx.homeDir + '/Library/Application Support/CherryStudio/Data/cherrystudio.sqlite',
+    ctx.homeDir + '/.config/CherryStudio/Data/cherrystudio.sqlite',
+  ],
+  async scan(ctx, customPaths) {
+    const errors: string[] = [];
+    const sessions: ParsedSession[] = [];
+    const dbs = customPaths.length ? customPaths : await probePaths(cherrystudio.defaultPaths(ctx));
+    for (const dbPath of dbs) {
+      try {
+        const res = await querySqliteSafe(dbPath, ctx.homeDir, [
+          { key: 'topics', sql: 'SELECT id, name, created_at, updated_at FROM topic WHERE deleted_at IS NULL' },
+          { key: 'messages', sql: 'SELECT topic_id, role, data, searchable_text, model_id, created_at FROM message WHERE deleted_at IS NULL' },
+          { key: 'agent_sessions', sql: 'SELECT id, name, created_at, updated_at FROM agent_session' },
+          { key: 'agent_messages', sql: 'SELECT session_id, role, data, searchable_text, model_id, created_at FROM agent_session_message' },
+          { key: 'models', sql: 'SELECT id, name FROM user_model' },
+        ]);
+        sessions.push(...parseCherryRows({
+          topics: res.topics.rows,
+          messages: res.messages.rows,
+          agent_sessions: res.agent_sessions.rows,
+          agent_messages: res.agent_messages.rows,
+          models: res.models.rows,
+        }));
+      } catch (e) {
+        errors.push(`${dbPath}: ${(e as Error).message}`);
+      }
+    }
+    return { sessions, errors };
+  },
+};
+
 // ============ 注册表 ============
 
-export const BUILTIN_ADAPTERS: ToolAdapter[] = [zcode, claude, codex, opencode, gemini, qwen, cline, pi, mimo, dsh];
+export const BUILTIN_ADAPTERS: ToolAdapter[] = [zcode, claude, codex, opencode, gemini, qwen, cline, codebuddy, cherrystudio, pi, mimo, dsh];
 
 export function getAdapter(id: string): ToolAdapter | undefined {
   return BUILTIN_ADAPTERS.find((a) => a.id === id);

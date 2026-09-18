@@ -8,6 +8,7 @@ import {
   Empty,
   Input,
   Modal,
+  Segmented,
   Select,
   Space,
   Table,
@@ -30,6 +31,7 @@ import {
   type ToolSummary,
 } from '../lib/db';
 import type { HubMessage, SessionRow } from '../types';
+import { rebuildFtsSession, searchMessages, type FtsHit } from '../lib/fts';
 import dayjs from 'dayjs';
 
 const ROLE_META: Record<string, { label: string; color: string }> = {
@@ -48,6 +50,9 @@ export default function Sessions() {
   const [tool, setTool] = useState('all');
   const [search, setSearch] = useState('');
   const [searchInput, setSearchInput] = useState('');
+  const [searchMode, setSearchMode] = useState<'meta' | 'fulltext'>('meta');
+  const [ftsHits, setFtsHits] = useState<FtsHit[] | null>(null);
+  const [ftsLoading, setFtsLoading] = useState(false);
 
   const [openId, setOpenId] = useState<string | null>(null);
   const [detail, setDetail] = useState<{ row: SessionRow; messages: HubMessage[] } | null>(null);
@@ -104,6 +109,7 @@ export default function Sessions() {
     if (!detail || !editing) return;
     const db = await initDb(homeDir);
     await saveEdit(db, detail.row.id, editing.index, editing.content);
+    await rebuildFtsSession(db, detail.row.id).catch(() => undefined);
     message.success(`消息 #${editing.index} 已更新`);
     setEditing(null);
     await reloadDetail();
@@ -114,6 +120,7 @@ export default function Sessions() {
     if (!detail) return;
     const db = await initDb(homeDir);
     await resetEdit(db, detail.row.id, index);
+    await rebuildFtsSession(db, detail.row.id).catch(() => undefined);
     message.success('已还原为原始内容');
     await reloadDetail();
     await load();
@@ -127,12 +134,31 @@ export default function Sessions() {
       onOk: async () => {
         const db = await initDb(homeDir);
         await resetSessionEdits(db, detail.row.id);
+        await rebuildFtsSession(db, detail.row.id).catch(() => undefined);
         message.success('已全部还原');
         await reloadDetail();
         await load();
       },
     });
   };
+
+  const doFtsSearch = async (q: string) => {
+    if (!q.trim()) {
+      setFtsHits(null);
+      return;
+    }
+    setFtsLoading(true);
+    try {
+      const db = await initDb(homeDir);
+      setFtsHits(await searchMessages(db, q, 80));
+    } catch (e) {
+      message.error(`全文搜索失败：${(e as Error).message}`);
+    } finally {
+      setFtsLoading(false);
+    }
+  };
+
+  const hitTitle = (sessionId: string) => rows.find((r) => r.id === sessionId)?.title ?? sessionId;
 
   const columns: ColumnsType<SessionRow> = useMemo(
     () => [
@@ -175,6 +201,17 @@ export default function Sessions() {
     <Space direction="vertical" size="middle" style={{ width: '100%' }}>
       <Card size="small">
         <Space wrap>
+          <Segmented
+            value={searchMode}
+            onChange={(v) => {
+              setSearchMode(v as 'meta' | 'fulltext');
+              if (v === 'meta') setFtsHits(null);
+            }}
+            options={[
+              { value: 'meta', label: '元信息' },
+              { value: 'fulltext', label: '🔍 全文' },
+            ]}
+          />
           <Select
             value={tool}
             onChange={(v) => setTool(v)}
@@ -182,25 +219,75 @@ export default function Sessions() {
             options={[{ value: 'all', label: '全部工具' }, ...tools.map((t) => ({ value: t.tool, label: `${t.tool} (${t.sessions})` }))]}
           />
           <Input.Search
-            placeholder="搜索标题 / 首条提问 / 项目"
+            placeholder={searchMode === 'meta' ? '搜索标题 / 首条提问 / 项目' : '搜索全部消息正文（如：CORS、RAG、报错关键词…）'}
             allowClear
-            style={{ width: 320 }}
+            style={{ width: 360 }}
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
-            onSearch={(v) => setSearch(v)}
+            onSearch={(v) => {
+              setSearchInput(v);
+              if (searchMode === 'fulltext') void doFtsSearch(v);
+              else setSearch(v);
+            }}
           />
-          <Typography.Text type="secondary">{rows.length} 个会话</Typography.Text>
+          <Typography.Text type="secondary">
+            {searchMode === 'fulltext'
+              ? ftsHits
+                ? `${ftsHits.length} 条命中（按相关度排序）`
+                : '输入关键词回车搜索全部消息内容'
+              : `${rows.length} 个会话`}
+          </Typography.Text>
         </Space>
       </Card>
 
-      <Table<SessionRow>
-        size="small"
-        rowKey="id"
-        columns={columns}
-        dataSource={rows}
-        loading={loading}
-        pagination={{ pageSize: 20, showSizeChanger: false }}
-      />
+      {searchMode === 'fulltext' ? (
+        <Table<FtsHit>
+          size="small"
+          rowKey={(r) => `${r.session_id}::${r.msg_index}`}
+          dataSource={ftsHits ?? []}
+          loading={ftsLoading}
+          pagination={{ pageSize: 15, showSizeChanger: false }}
+          columns={[
+            {
+              title: '会话',
+              key: 'session',
+              width: 220,
+              ellipsis: true,
+              render: (_: unknown, r: FtsHit) => (
+                <Tooltip title={hitTitle(r.session_id)}>
+                  <a onClick={() => void openDetail(r.session_id)}>{hitTitle(r.session_id)}</a>
+                </Tooltip>
+              ),
+            },
+            {
+              title: '角色',
+              dataIndex: 'role',
+              key: 'role',
+              width: 80,
+              render: (v: string) => <Tag color={ROLE_META[v]?.color ?? 'default'}>{ROLE_META[v]?.label ?? v}</Tag>,
+            },
+            {
+              title: '命中片段',
+              dataIndex: 'snippet',
+              key: 'snippet',
+              render: (v: string) => (
+                <Typography.Text style={{ fontSize: 13 }} type="secondary">
+                  {v}
+                </Typography.Text>
+              ),
+            },
+          ]}
+        />
+      ) : (
+        <Table<SessionRow>
+          size="small"
+          rowKey="id"
+          columns={columns}
+          dataSource={rows}
+          loading={loading}
+          pagination={{ pageSize: 20, showSizeChanger: false }}
+        />
+      )}
 
       <Drawer
         width={Math.min(780, typeof window !== 'undefined' ? window.innerWidth - 60 : 780)}

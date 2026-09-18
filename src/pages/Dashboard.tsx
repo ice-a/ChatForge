@@ -16,6 +16,7 @@ import {
 } from '../lib/db';
 import { runScan } from '../lib/scan';
 import { usageToCsv, exportText } from '../lib/export';
+import { estimateCost, loadPrices } from '../lib/prices';
 import dayjs from 'dayjs';
 
 const TOOL_COLORS = ['#4f46e5', '#0891b2', '#059669', '#d97706', '#dc2626', '#7c3aed', '#db2777', '#2563eb', '#4d7c0f', '#6b7280'];
@@ -31,6 +32,7 @@ export default function Dashboard({ onGoSettings }: { onGoSettings: () => void }
   const [daily, setDaily] = useState<Awaited<ReturnType<typeof getDailyTrend>>>([]);
   const [hours, setHours] = useState<Awaited<ReturnType<typeof getHourDistribution>>>([]);
   const [projects, setProjects] = useState<Awaited<ReturnType<typeof getTopProjects>>>([]);
+  const [prices, setPrices] = useState<Awaited<ReturnType<typeof loadPrices>>>([]);
   const [toolFilter, setToolFilter] = useState<string>('all');
 
   const load = useCallback(async () => {
@@ -38,13 +40,14 @@ export default function Dashboard({ onGoSettings }: { onGoSettings: () => void }
     setLoading(true);
     try {
       const db = await initDb(homeDir);
-      const [t, tools, models, d, h, p] = await Promise.all([
+      const [t, tools, models, d, h, p, prices] = await Promise.all([
         getTotalCount(db),
         getToolSummary(db),
         getModelUsage(db),
         getDailyTrend(db, 30),
         getHourDistribution(db),
         getTopProjects(db, 10),
+        loadPrices(homeDir),
       ]);
       setTotal(t);
       setToolSummary(tools);
@@ -52,6 +55,7 @@ export default function Dashboard({ onGoSettings }: { onGoSettings: () => void }
       setDaily(d);
       setHours(h);
       setProjects(p);
+      setPrices(prices);
     } catch (e) {
       message.error(`加载统计失败：${(e as Error).message}`);
     } finally {
@@ -73,6 +77,18 @@ export default function Dashboard({ onGoSettings }: { onGoSettings: () => void }
   const totalTokensIn = toolSummary.reduce((a, t) => a + Number(t.tokens_in ?? 0), 0);
   const totalTokensOut = toolSummary.reduce((a, t) => a + Number(t.tokens_out ?? 0), 0);
   const modelCount = new Set(modelUsage.map((m) => m.model)).size;
+  const costOf = (m: ModelUsage) => estimateCost(m.model, Number(m.tokens_in ?? 0), Number(m.tokens_out ?? 0), prices);
+  const totalCost = modelUsage.reduce<number>((a, m) => a + (costOf(m) ?? 0), 0);
+  const hasAnyCost = modelUsage.some((m) => costOf(m) !== null);
+  const costByTool = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const m of modelUsage) {
+      const c = costOf(m);
+      if (c) map.set(m.tool, (map.get(m.tool) ?? 0) + c);
+    }
+    return [...map.entries()].map(([tool, cost]) => ({ tool, cost })).sort((a, b) => b.cost - a.cost);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modelUsage, prices]);
 
   const pieOption = useMemo(
     () => ({
@@ -158,6 +174,16 @@ export default function Dashboard({ onGoSettings }: { onGoSettings: () => void }
     { title: '输入 Token', dataIndex: 'tokens_in', key: 'tokens_in', sorter: (a, b) => a.tokens_in - b.tokens_in, width: 110, render: (v: number) => (v > 0 ? v.toLocaleString() : '—') },
     { title: '输出 Token', dataIndex: 'tokens_out', key: 'tokens_out', sorter: (a, b) => a.tokens_out - b.tokens_out, width: 110, render: (v: number) => (v > 0 ? v.toLocaleString() : '—') },
     {
+      title: '估算成本',
+      key: 'cost',
+      width: 100,
+      render: (_: unknown, r: ModelUsage) => {
+        const c = costOf(r);
+        return c !== null ? <span>${c < 0.01 ? c.toFixed(4) : c.toFixed(2)}</span> : <Typography.Text type="secondary">—</Typography.Text>;
+      },
+      sorter: (a, b) => (costOf(a) ?? 0) - (costOf(b) ?? 0),
+    },
+    {
       title: '会话占比',
       key: 'pct',
       width: 110,
@@ -181,7 +207,7 @@ export default function Dashboard({ onGoSettings }: { onGoSettings: () => void }
   };
 
   const doExportCsv = async () => {
-    const path = await exportText(homeDir, `用量统计-${dayjs().format('YYYYMMDD-HHmmss')}.csv`, usageToCsv(filteredUsage));
+    const path = await exportText(homeDir, `用量统计-${dayjs().format('YYYYMMDD-HHmmss')}.csv`, usageToCsv(filteredUsage, prices));
     message.success(`已导出：${path}`);
   };
 
@@ -207,6 +233,13 @@ export default function Dashboard({ onGoSettings }: { onGoSettings: () => void }
         <Col xs={12} md={4}><Card size="small"><Statistic title="模型数" value={modelCount} loading={loading} /></Card></Col>
         <Col xs={12} md={4}><Card size="small"><Statistic title="输入 Token" value={totalTokensIn} loading={loading} /></Card></Col>
         <Col xs={12} md={4}><Card size="small"><Statistic title="输出 Token" value={totalTokensOut} loading={loading} /></Card></Col>
+        {hasAnyCost && (
+          <Col xs={12} md={4}>
+            <Card size="small">
+              <Statistic title="估算成本" value={totalCost} precision={totalCost < 1 ? 4 : 2} prefix="$" loading={loading} />
+            </Card>
+          </Col>
+        )}
       </Row>
 
       <Row gutter={[12, 12]}>
@@ -230,6 +263,30 @@ export default function Dashboard({ onGoSettings }: { onGoSettings: () => void }
             <EChart option={hourOption} height={240} />
           </Card>
         </Col>
+        {hasAnyCost && costByTool.length > 0 && (
+          <Col xs={24} md={12}>
+            <Card size="small" title="估算成本 · 工具占比">
+              <EChart
+                option={{
+                  tooltip: { trigger: 'item', valueFormatter: (v: number) => `$${v.toFixed(4)}` },
+                  legend: { orient: 'vertical', right: 8, top: 'center', type: 'scroll' as const },
+                  series: [
+                    {
+                      name: '估算成本',
+                      type: 'pie',
+                      radius: ['40%', '70%'],
+                      center: ['38%', '50%'],
+                      itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
+                      label: { show: false },
+                      data: costByTool.map((c, i) => ({ name: c.tool, value: c.cost, itemStyle: { color: TOOL_COLORS[i % TOOL_COLORS.length] } })),
+                    },
+                  ],
+                }}
+                height={240}
+              />
+            </Card>
+          </Col>
+        )}
       </Row>
 
       <Card
