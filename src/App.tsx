@@ -40,7 +40,7 @@ export default function App() {
   const [collapsed, setCollapsed] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState('');
-  const { homeDir, bridgeMode, bridgeVersion, initDone, initError, initData, lastScanAt, lastScanReport, setScanResult } =
+  const { homeDir, bridgeMode, bridgeVersion, initDone, initError, initData, lastScanAt, lastScanReport, setScanResult, theme: themeMode, setTheme } =
     useAppStore();
 
   useEffect(() => {
@@ -153,6 +153,12 @@ export default function App() {
             />
           </Space>
           <Space>
+            <Button
+              icon={<span style={{ fontSize: 14 }}>{themeMode === 'dark' ? '🌙' : '☀️'}</span>}
+              onClick={() => setTheme(themeMode === 'dark' ? 'light' : 'dark')}
+            >
+              {themeMode === 'dark' ? '深色' : '浅色'}
+            </Button>
             {lastScanAt > 0 && (
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                 上次扫描：{dayjs(lastScanAt).format('MM-DD HH:mm')}

@@ -24,6 +24,16 @@ import { saveLlmConfig, loadLlmConfig } from '../lib/profile';
 import { testLLM, LLM_PRESETS } from '../lib/llm';
 import { clearAllData, getHubPath, initDb, saveSetting } from '../lib/db';
 import { DEFAULT_PRICES, loadPrices, savePrices, type ModelPrice } from '../lib/prices';
+import {
+  applyProvider,
+  loadPresets,
+  readCurrentConfigs,
+  savePresets,
+  TARGET_LABEL,
+  type CurrentConfig,
+  type ProviderPreset,
+  type ProviderTarget,
+} from '../lib/providers';
 import { exportText } from '../lib/export';
 import type { CustomSource, LlmConfig } from '../types';
 import dayjs from 'dayjs';
@@ -40,6 +50,9 @@ export default function Settings() {
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [newSource, setNewSource] = useState<CustomSource>({ id: '', name: '', path: '', format: 'chat-jsonl' });
   const [priceRows, setPriceRows] = useState<ModelPrice[]>([]);
+  const [presets, setPresets] = useState<ProviderPreset[]>([]);
+  const [currentConfigs, setCurrentConfigs] = useState<CurrentConfig[]>([]);
+  const [newPreset, setNewPreset] = useState<ProviderPreset>({ id: '', name: '', baseUrl: '', apiKey: '', model: '' });
   const [llmForm] = Form.useForm<LlmConfig>();
 
   const load = useCallback(async () => {
@@ -52,6 +65,8 @@ export default function Settings() {
       setLastScan(await getLastScanReport(homeDir));
       setHubPath(await getHubPath(homeDir));
       setPriceRows(await loadPrices(homeDir));
+      setPresets(await loadPresets(homeDir));
+      setCurrentConfigs(await readCurrentConfigs(homeDir));
       const cfg = await loadLlmConfig(homeDir);
       if (cfg) llmForm.setFieldsValue(cfg);
       else llmForm.setFieldsValue({ protocol: 'openai', baseUrl: '', apiKey: '', model: '', temperature: 0.4 });
@@ -283,6 +298,83 @@ export default function Settings() {
             message={testResult.message}
           />
         )}
+      </Card>
+
+      <Card size="small" title="供应商切换（对标 cc-switch · 管理 AI 工具的 API 配置）">
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message="应用前会自动备份原配置文件（.bak-时间戳）。切换后需重启对应工具生效。"
+        />
+        <div style={{ marginBottom: 12 }}>
+          {currentConfigs.map((c) => (
+            <Tag key={c.target} style={{ marginBottom: 4 }}>
+              {TARGET_LABEL[c.target]}：{c.found ? (c.baseUrl || '默认官方配置') : '未安装/未配置'}
+              {c.model ? ` · ${c.model}` : ''}
+            </Tag>
+          ))}
+        </div>
+        <Table<ProviderPreset>
+          size="small"
+          rowKey="id"
+          dataSource={presets}
+          pagination={false}
+          locale={{ emptyText: '还没有预设，先在下方添加' }}
+          columns={[
+            { title: '名称', dataIndex: 'name', width: 120 },
+            { title: 'BaseURL', dataIndex: 'baseUrl', ellipsis: true },
+            { title: '模型', dataIndex: 'model', width: 130, render: (v: string) => v || '—' },
+            {
+              title: '应用到',
+              key: 'apply',
+              width: 260,
+              render: (_: unknown, r: ProviderPreset) => (
+                <Space size={4}>
+                  {(['claude', 'codex', 'gemini'] as ProviderTarget[]).map((t) => (
+                    <Button
+                      key={t}
+                      size="small"
+                      onClick={async () => {
+                        const r2 = await applyProvider(homeDir, t, r);
+                        if (r2.ok) message.success(`${TARGET_LABEL[t]}：${r2.message}${r2.backup ? '（已备份 ' + r2.backup.split(/[\\/]/).pop() + '）' : ''}`);
+                        else message.error(r2.message);
+                        setCurrentConfigs(await readCurrentConfigs(homeDir));
+                      }}
+                    >
+                      {TARGET_LABEL[t].replace(' CLI', '').replace(' Code', '')}
+                    </Button>
+                  ))}
+                  <Button size="small" danger icon={<DeleteOutlined />} onClick={async () => { const next = presets.filter((p) => p.id !== r.id); await savePresets(homeDir, next); setPresets(next); }} />
+                </Space>
+              ),
+            },
+          ]}
+        />
+        <Space wrap style={{ marginTop: 12 }}>
+          <Input size="small" style={{ width: 130 }} placeholder="预设名称" value={newPreset.name} onChange={(e) => setNewPreset({ ...newPreset, name: e.target.value })} />
+          <Input size="small" style={{ width: 300 }} placeholder="BaseURL，如 https://api.deepseek.com" value={newPreset.baseUrl} onChange={(e) => setNewPreset({ ...newPreset, baseUrl: e.target.value })} />
+          <Input.Password size="small" style={{ width: 220 }} placeholder="API Key" value={newPreset.apiKey} onChange={(e) => setNewPreset({ ...newPreset, apiKey: e.target.value })} autoComplete="new-password" />
+          <Input size="small" style={{ width: 160 }} placeholder="模型（可选）" value={newPreset.model} onChange={(e) => setNewPreset({ ...newPreset, model: e.target.value })} />
+          <Button
+            size="small"
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={async () => {
+              if (!newPreset.name || !newPreset.baseUrl) {
+                message.warning('请至少填写名称和 BaseURL');
+                return;
+              }
+              const next = [...presets, { ...newPreset, id: `p-${Date.now().toString(36)}` }];
+              await savePresets(homeDir, next);
+              setPresets(next);
+              setNewPreset({ id: '', name: '', baseUrl: '', apiKey: '', model: '' });
+              message.success('预设已保存');
+            }}
+          >
+            添加预设
+          </Button>
+        </Space>
       </Card>
 
       <Card size="small" title="模型价格表（成本估算用，$/1M tokens）">

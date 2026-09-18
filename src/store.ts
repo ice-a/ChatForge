@@ -12,10 +12,12 @@ interface AppState {
   lastScanReport: ScanReportItem[];
   initDone: boolean;
   initError: string;
+  theme: 'light' | 'dark';
 
   initData: () => Promise<void>;
   bumpDataVersion: () => void;
   setScanResult: (at: number, report: ScanReportItem[]) => Promise<void>;
+  setTheme: (t: 'light' | 'dark') => void;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -27,6 +29,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   lastScanReport: [],
   initDone: false,
   initError: '',
+  theme: (localStorage.getItem('chatforge.theme') as 'light' | 'dark') || 'light',
+
+  setTheme(t) {
+    localStorage.setItem('chatforge.theme', t);
+    set({ theme: t });
+  },
 
   async initData() {
     try {
