@@ -1,6 +1,6 @@
 [package]
 name = "chatforge"
-version = "0.1.0"
+version = "0.2.0"
 description = "ChatForge · 会话锻造厂（Tauri 2 全平台）"
 edition = "2021"
 rust-version = "1.77"
