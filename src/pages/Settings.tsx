@@ -448,6 +448,9 @@ export default function Settings() {
           </Typography.Text>
           <Space wrap style={{ marginTop: 8 }}>
             <Button onClick={() => void exportAll()}>导出全部会话 JSON</Button>
+            <Button type="primary" ghost onClick={() => window.open('https://github.com/ice-a/ChatForge/releases/latest', '_blank')}>
+              检查更新（GitHub Releases）
+            </Button>
             <Popconfirm
               title="确定清空全部数据？"
               description="将删除已入库的会话、编辑与画像（各工具原始文件不受影响）。"

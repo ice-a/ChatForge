@@ -1,6 +1,6 @@
 import { chatLLM, extractJsonLoose, maskSensitive } from './llm';
 import { loadLlmConfig, loadProfile } from './profile';
-import { fsWriteFile, pathJoin } from '../bridge/client';
+import { fsReadFile, fsWriteFile, pathJoin } from '../bridge/client';
 import { initDb, listSessions } from './db';
 import type { UserProfile } from '../types';
 
@@ -210,6 +210,41 @@ export async function installSkill(homeDir: string, target: InstallTarget, name:
   const file = await pathJoin(target.dir(homeDir), name, 'SKILL.md');
   await fsWriteFile(file, content);
   return file;
+}
+
+// ---------- 记忆回写项目目录 ----------
+
+export type AgentFileKind = 'AGENTS.md' | 'CLAUDE.md';
+export type WriteMode = 'overwrite' | 'append';
+
+/** 把画像/记忆写成项目目录下的 AGENTS.md / CLAUDE.md（覆盖前自动备份） */
+export async function writeAgentFile(
+  projectPath: string,
+  kind: AgentFileKind,
+  content: string,
+  mode: WriteMode,
+): Promise<{ file: string; backup?: string; appended: boolean }> {
+  const file = await pathJoin(projectPath, kind);
+  let existing = '';
+  try {
+    existing = (await fsReadFile(file, 8 * 1024 * 1024)).text;
+  } catch {
+    existing = '';
+  }
+  let backup: string | undefined;
+  let appended = false;
+  let finalContent = content;
+  if (existing.trim()) {
+    if (mode === 'append') {
+      finalContent = `${existing.trimEnd()}\n\n---\n\n<!-- ChatForge 追加于 ${new Date().toLocaleString()} -->\n\n${content}`;
+      appended = true;
+    } else {
+      backup = `${file}.bak-${Date.now()}`;
+      await fsWriteFile(backup, existing);
+    }
+  }
+  await fsWriteFile(file, finalContent);
+  return { file, backup, appended };
 }
 
 /** 会话证据抽样（供蒸馏页选择） */

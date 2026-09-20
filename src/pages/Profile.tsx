@@ -13,6 +13,7 @@ import {
   Modal,
   Popconfirm,
   Row,
+  Select,
   Space,
   Spin,
   Statistic,
@@ -24,6 +25,7 @@ import {
   DownloadOutlined,
   EditOutlined,
   FileTextOutlined,
+  FolderOpenOutlined,
   PictureOutlined,
   PlusOutlined,
   RobotOutlined,
@@ -35,6 +37,7 @@ import { generateProfileWithLLM, generateRuleProfile, loadLlmConfig, loadProfile
 import { exportText, profileToAgentsMd, profileToMarkdown } from '../lib/export';
 import { initDb, saveProfile } from '../lib/db';
 import { collectShareData, exportShareCard } from '../lib/sharecard';
+import { writeAgentFile, type AgentFileKind, type WriteMode } from '../lib/distill';
 import type { UserProfile } from '../types';
 import dayjs from 'dayjs';
 
@@ -163,6 +166,25 @@ export default function Profile() {
       message.success(`分享卡片已生成并开始下载（${file}）`);
     } catch (e) {
       message.error(`生成失败：${(e as Error).message}`);
+    }
+  };
+
+  const [writeOpen, setWriteOpen] = useState(false);
+  const [writePath, setWritePath] = useState('');
+  const [writeKind, setWriteKind] = useState<AgentFileKind>('AGENTS.md');
+  const [writeMode, setWriteMode] = useState<WriteMode>('overwrite');
+
+  const doWriteProject = async () => {
+    if (!writePath.trim()) {
+      message.warning('请填写项目路径');
+      return;
+    }
+    try {
+      const r = await writeAgentFile(writePath.trim(), writeKind, profileToAgentsMd(p), writeMode);
+      message.success(`已写入 ${r.file}${r.backup ? '（原文件备份 ' + r.backup.split(/[\\/]/).pop() + '）' : ''}`);
+      setWriteOpen(false);
+    } catch (e) {
+      message.error(`写入失败：${(e as Error).message}`);
     }
   };
 
@@ -340,11 +362,36 @@ export default function Profile() {
           <Button icon={<DownloadOutlined />} onClick={() => void doExport('json')}>画像 JSON</Button>
           <Button icon={<FileTextOutlined />} onClick={() => void doExport('agents')}>AGENTS.md</Button>
           <Button icon={<FileTextOutlined />} onClick={() => void doExport('claude')}>CLAUDE.md</Button>
+          <Button icon={<FolderOpenOutlined />} onClick={() => setWriteOpen(true)}>写入项目目录…</Button>
         </Space>
         <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginTop: 8, marginBottom: 0 }}>
-          导出写入 Downloads/chatforge 目录（开发模式下写入用户目录）。
+          导出写入 Downloads/chatforge 目录；「写入项目目录」直接为指定项目生成 AGENTS.md / CLAUDE.md 让 AI 工具立即生效。
         </Typography.Paragraph>
       </Card>
+
+      <Modal
+        title="写入项目目录（记忆回写）"
+        open={writeOpen}
+        onCancel={() => setWriteOpen(false)}
+        onOk={() => void doWriteProject()}
+        okText="写入"
+        cancelText="取消"
+      >
+        <Space direction="vertical" size={8} style={{ width: '100%' }}>
+          <Input
+            placeholder="项目绝对路径，如 C:\Users\lee\Desktop\server\rapid"
+            value={writePath}
+            onChange={(e) => setWritePath(e.target.value)}
+          />
+          <Space wrap>
+            <Select value={writeKind} onChange={setWriteKind} style={{ width: 160 }} options={[{ value: 'AGENTS.md', label: 'AGENTS.md（通用）' }, { value: 'CLAUDE.md', label: 'CLAUDE.md（Claude）' }]} />
+            <Select value={writeMode} onChange={setWriteMode} style={{ width: 140 }} options={[{ value: 'overwrite', label: '覆盖（自动备份）' }, { value: 'append', label: '追加' }]} />
+          </Space>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            内容 = 画像蒸馏的记忆（技术栈/协作偏好/项目列表）。写入后该项目的 AI 工具会话即可直接利用这些记忆。
+          </Typography.Text>
+        </Space>
+      </Modal>
 
       <Modal
         title="手动编辑画像"
