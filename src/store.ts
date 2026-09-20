@@ -13,11 +13,13 @@ interface AppState {
   initDone: boolean;
   initError: string;
   theme: 'light' | 'dark';
+  lang: 'zh' | 'en';
 
   initData: () => Promise<void>;
   bumpDataVersion: () => void;
   setScanResult: (at: number, report: ScanReportItem[]) => Promise<void>;
   setTheme: (t: 'light' | 'dark') => void;
+  setLang: (l: 'zh' | 'en') => void;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -30,10 +32,16 @@ export const useAppStore = create<AppState>((set, get) => ({
   initDone: false,
   initError: '',
   theme: (localStorage.getItem('chatforge.theme') as 'light' | 'dark') || 'light',
+  lang: (localStorage.getItem('chatforge.lang') as 'zh' | 'en') || 'zh',
 
   setTheme(t) {
     localStorage.setItem('chatforge.theme', t);
     set({ theme: t });
+  },
+
+  setLang(l) {
+    localStorage.setItem('chatforge.lang', l);
+    set({ lang: l });
   },
 
   async initData() {

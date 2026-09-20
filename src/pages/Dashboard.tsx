@@ -18,12 +18,14 @@ import { runScan } from '../lib/scan';
 import { generateRuleProfile } from '../lib/profile';
 import { usageToCsv, exportText } from '../lib/export';
 import { estimateCost, loadPrices } from '../lib/prices';
+import { useI18n } from '../i18n';
 import dayjs from 'dayjs';
 
 const TOOL_COLORS = ['#4f46e5', '#0891b2', '#059669', '#d97706', '#dc2626', '#7c3aed', '#db2777', '#2563eb', '#4d7c0f', '#6b7280'];
 
 export default function Dashboard({ onGoSettings }: { onGoSettings: () => void }) {
   const { message } = AntApp.useApp();
+  const { t } = useI18n();
   const { homeDir, dataVersion, lastScanAt, setScanResult } = useAppStore();
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
@@ -58,7 +60,7 @@ export default function Dashboard({ onGoSettings }: { onGoSettings: () => void }
       setProjects(p);
       setPrices(prices);
     } catch (e) {
-      message.error(`加载统计失败：${(e as Error).message}`);
+      message.error(t('dash.loadFail', { msg: (e as Error).message }));
     } finally {
       setLoading(false);
     }
@@ -97,7 +99,7 @@ export default function Dashboard({ onGoSettings }: { onGoSettings: () => void }
       legend: { orient: 'vertical', right: 8, top: 'center', type: 'scroll' as const },
       series: [
         {
-          name: '工具会话占比',
+          name: t('dash.pieName'),
           type: 'pie',
           radius: ['40%', '70%'],
           center: ['38%', '50%'],
@@ -122,8 +124,8 @@ export default function Dashboard({ onGoSettings }: { onGoSettings: () => void }
       xAxis: { type: 'category', data: top.map((m) => `${m.tool}·${m.model}`), axisLabel: { rotate: 24, fontSize: 10 } },
       yAxis: { type: 'value' },
       series: [
-        { name: '会话数', type: 'bar', data: top.map((m) => m.sessions), itemStyle: { color: '#4f46e5', borderRadius: [4, 4, 0, 0] }, barMaxWidth: 28 },
-        { name: '消息数', type: 'bar', data: top.map((m) => m.msgs), itemStyle: { color: '#94a3b8', borderRadius: [4, 4, 0, 0] }, barMaxWidth: 28 },
+        { name: t('dash.barSessions'), type: 'bar', data: top.map((m) => m.sessions), itemStyle: { color: '#4f46e5', borderRadius: [4, 4, 0, 0] }, barMaxWidth: 28 },
+        { name: t('dash.barMsgs'), type: 'bar', data: top.map((m) => m.msgs), itemStyle: { color: '#94a3b8', borderRadius: [4, 4, 0, 0] }, barMaxWidth: 28 },
       ],
     };
   }, [modelUsage]);
@@ -157,7 +159,7 @@ export default function Dashboard({ onGoSettings }: { onGoSettings: () => void }
       yAxis: { type: 'value', minInterval: 1 },
       series: [
         {
-          name: '会话数',
+          name: t('dash.barSessions'),
           type: 'bar',
           data: Array.from({ length: 24 }, (_, i) => map.get(String(i).padStart(2, '0')) ?? 0),
           itemStyle: { color: '#7c3aed', borderRadius: [4, 4, 0, 0] },
@@ -168,14 +170,14 @@ export default function Dashboard({ onGoSettings }: { onGoSettings: () => void }
   }, [hours]);
 
   const columns: ColumnsType<ModelUsage> = [
-    { title: '工具', dataIndex: 'tool', key: 'tool', width: 100, filters: [...new Set(modelUsage.map((m) => m.tool))].map((t) => ({ text: t, value: t })), onFilter: (v, r) => r.tool === v },
-    { title: '模型', dataIndex: 'model', key: 'model', ellipsis: true, render: (v: string) => <Tag>{v}</Tag> },
-    { title: '会话数', dataIndex: 'sessions', key: 'sessions', sorter: (a, b) => a.sessions - b.sessions, defaultSortOrder: 'descend', width: 90, render: (v: number) => v.toLocaleString() },
-    { title: '消息数', dataIndex: 'msgs', key: 'msgs', sorter: (a, b) => a.msgs - b.msgs, width: 90, render: (v: number) => v.toLocaleString() },
-    { title: '输入 Token', dataIndex: 'tokens_in', key: 'tokens_in', sorter: (a, b) => a.tokens_in - b.tokens_in, width: 110, render: (v: number) => (v > 0 ? v.toLocaleString() : '—') },
-    { title: '输出 Token', dataIndex: 'tokens_out', key: 'tokens_out', sorter: (a, b) => a.tokens_out - b.tokens_out, width: 110, render: (v: number) => (v > 0 ? v.toLocaleString() : '—') },
+    { title: t('dash.col.tool'), dataIndex: 'tool', key: 'tool', width: 100, filters: [...new Set(modelUsage.map((m) => m.tool))].map((tt) => ({ text: tt, value: tt })), onFilter: (v, r) => r.tool === v },
+    { title: t('dash.col.model'), dataIndex: 'model', key: 'model', ellipsis: true, render: (v: string) => <Tag>{v}</Tag> },
+    { title: t('dash.col.sessions'), dataIndex: 'sessions', key: 'sessions', sorter: (a, b) => a.sessions - b.sessions, defaultSortOrder: 'descend', width: 90, render: (v: number) => v.toLocaleString() },
+    { title: t('dash.col.msgs'), dataIndex: 'msgs', key: 'msgs', sorter: (a, b) => a.msgs - b.msgs, width: 90, render: (v: number) => v.toLocaleString() },
+    { title: t('dash.tokensIn'), dataIndex: 'tokens_in', key: 'tokens_in', sorter: (a, b) => a.tokens_in - b.tokens_in, width: 110, render: (v: number) => (v > 0 ? v.toLocaleString() : '—') },
+    { title: t('dash.tokensOut'), dataIndex: 'tokens_out', key: 'tokens_out', sorter: (a, b) => a.tokens_out - b.tokens_out, width: 110, render: (v: number) => (v > 0 ? v.toLocaleString() : '—') },
     {
-      title: '估算成本',
+      title: t('dash.estCost'),
       key: 'cost',
       width: 100,
       render: (_: unknown, r: ModelUsage) => {
@@ -185,13 +187,13 @@ export default function Dashboard({ onGoSettings }: { onGoSettings: () => void }
       sorter: (a, b) => (costOf(a) ?? 0) - (costOf(b) ?? 0),
     },
     {
-      title: '会话占比',
+      title: t('dash.col.share'),
       key: 'pct',
       width: 110,
       render: (_: unknown, r: ModelUsage) => `${((r.sessions / totalSessions) * 100).toFixed(1)}%`,
       sorter: (a, b) => a.sessions - b.sessions,
     },
-    { title: '最近活跃', dataIndex: 'last_active', key: 'last_active', width: 150, sorter: (a, b) => a.last_active - b.last_active, render: (v: number) => dayjs(v).format('YYYY-MM-DD HH:mm') },
+    { title: t('dash.col.lastActive'), dataIndex: 'last_active', key: 'last_active', width: 150, sorter: (a, b) => a.last_active - b.last_active, render: (v: number) => dayjs(v).format('YYYY-MM-DD HH:mm') },
   ];
 
   const rescan = async () => {
@@ -199,7 +201,7 @@ export default function Dashboard({ onGoSettings }: { onGoSettings: () => void }
     try {
       const report = await runScan(homeDir, {});
       await setScanResult(Date.now(), report);
-      message.success(`重新扫描完成：${report.reduce((a, r) => a + r.sessions, 0)} 个会话`);
+      message.success(t('dash.rescanDone', { n: report.reduce((a, r) => a + r.sessions, 0) }));
     } catch (e) {
       message.error((e as Error).message);
     } finally {
@@ -214,7 +216,7 @@ export default function Dashboard({ onGoSettings }: { onGoSettings: () => void }
       await setScanResult(Date.now(), report);
       const total = report.reduce((a, r) => a + r.sessions, 0);
       await generateRuleProfile(homeDir);
-      message.success(`已扫描 ${total} 个会话并生成本地画像，去「用户画像」页查看 →`);
+      message.success(t('dash.scanProfileDone', { n: total }));
     } catch (e) {
       message.error((e as Error).message);
     } finally {
@@ -224,21 +226,21 @@ export default function Dashboard({ onGoSettings }: { onGoSettings: () => void }
 
   const doExportCsv = async () => {
     const path = await exportText(homeDir, `用量统计-${dayjs().format('YYYYMMDD-HHmmss')}.csv`, usageToCsv(filteredUsage, prices));
-    message.success(`已导出：${path}`);
+    message.success(t('dash.exportDone', { path }));
   };
 
   if (!loading && total === 0) {
     return (
-      <Empty description="还没有会话数据，三步开始：扫描 → 生成画像 → 蒸馏 Skill" style={{ marginTop: 80 }}>
+      <Empty description={t('dash.empty.title')} style={{ marginTop: 80 }}>
         <Space direction="vertical" size="middle">
           <Space>
             <Button type="primary" icon={<SyncOutlined />} loading={scanning} onClick={scanAndProfile}>
-              一键扫描并生成画像（推荐）
+              {t('dash.empty.cta')}
             </Button>
-            <Button onClick={onGoSettings}>配置会话来源</Button>
+            <Button onClick={onGoSettings}>{t('dash.empty.config')}</Button>
           </Space>
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            支持的 18 个工具没装也没关系：自动探测，找不到就跳过，之后可在设置里手动指定路径。
+            {t('dash.empty.note')}
           </Typography.Text>
         </Space>
       </Empty>
@@ -248,16 +250,16 @@ export default function Dashboard({ onGoSettings }: { onGoSettings: () => void }
   return (
     <Space direction="vertical" size="middle" style={{ width: '100%' }}>
       <Row gutter={[12, 12]}>
-        <Col xs={12} md={4}><Card size="small"><Statistic title="会话总数" value={total} loading={loading} /></Card></Col>
-        <Col xs={12} md={4}><Card size="small"><Statistic title="消息总数" value={totalMsgs} loading={loading} /></Card></Col>
-        <Col xs={12} md={4}><Card size="small"><Statistic title="工具数" value={toolSummary.length} loading={loading} /></Card></Col>
-        <Col xs={12} md={4}><Card size="small"><Statistic title="模型数" value={modelCount} loading={loading} /></Card></Col>
-        <Col xs={12} md={4}><Card size="small"><Statistic title="输入 Token" value={totalTokensIn} loading={loading} /></Card></Col>
-        <Col xs={12} md={4}><Card size="small"><Statistic title="输出 Token" value={totalTokensOut} loading={loading} /></Card></Col>
+        <Col xs={12} md={4}><Card size="small"><Statistic title={t('dash.totalSessions')} value={total} loading={loading} /></Card></Col>
+        <Col xs={12} md={4}><Card size="small"><Statistic title={t('dash.totalMsgs')} value={totalMsgs} loading={loading} /></Card></Col>
+        <Col xs={12} md={4}><Card size="small"><Statistic title={t('dash.toolCount')} value={toolSummary.length} loading={loading} /></Card></Col>
+        <Col xs={12} md={4}><Card size="small"><Statistic title={t('dash.modelCount')} value={modelCount} loading={loading} /></Card></Col>
+        <Col xs={12} md={4}><Card size="small"><Statistic title={t('dash.tokensIn')} value={totalTokensIn} loading={loading} /></Card></Col>
+        <Col xs={12} md={4}><Card size="small"><Statistic title={t('dash.tokensOut')} value={totalTokensOut} loading={loading} /></Card></Col>
         {hasAnyCost && (
           <Col xs={12} md={4}>
             <Card size="small">
-              <Statistic title="估算成本" value={totalCost} precision={totalCost < 1 ? 4 : 2} prefix="$" loading={loading} />
+              <Statistic title={t('dash.estCost')} value={totalCost} precision={totalCost < 1 ? 4 : 2} prefix="$" loading={loading} />
             </Card>
           </Col>
         )}
@@ -265,35 +267,35 @@ export default function Dashboard({ onGoSettings }: { onGoSettings: () => void }
 
       <Row gutter={[12, 12]}>
         <Col xs={24} md={10}>
-          <Card size="small" title="工具会话占比">
+          <Card size="small" title={t('dash.toolShare')}>
             <EChart option={pieOption} height={260} />
           </Card>
         </Col>
         <Col xs={24} md={14}>
-          <Card size="small" title="模型用量 TOP10">
+          <Card size="small" title={t('dash.modelTop')}>
             <EChart option={modelBarOption} height={260} />
           </Card>
         </Col>
         <Col xs={24} md={12}>
-          <Card size="small" title="近 30 天会话趋势">
+          <Card size="small" title={t('dash.trend30')}>
             <EChart option={trendOption} height={240} />
           </Card>
         </Col>
         <Col xs={24} md={12}>
-          <Card size="small" title="24 小时活跃分布">
+          <Card size="small" title={t('dash.hours24')}>
             <EChart option={hourOption} height={240} />
           </Card>
         </Col>
         {hasAnyCost && costByTool.length > 0 && (
           <Col xs={24} md={12}>
-            <Card size="small" title="估算成本 · 工具占比">
+            <Card size="small" title={t('dash.costByTool')}>
               <EChart
                 option={{
                   tooltip: { trigger: 'item', valueFormatter: (v: number) => `$${v.toFixed(4)}` },
                   legend: { orient: 'vertical', right: 8, top: 'center', type: 'scroll' as const },
                   series: [
                     {
-                      name: '估算成本',
+                      name: t('dash.estCost'),
                       type: 'pie',
                       radius: ['40%', '70%'],
                       center: ['38%', '50%'],
@@ -312,7 +314,7 @@ export default function Dashboard({ onGoSettings }: { onGoSettings: () => void }
 
       <Card
         size="small"
-        title="工具 × 模型用量明细"
+        title={t('dash.usageTable')}
         extra={
           <Space>
             <Select
@@ -320,10 +322,10 @@ export default function Dashboard({ onGoSettings }: { onGoSettings: () => void }
               value={toolFilter}
               onChange={setToolFilter}
               style={{ width: 140 }}
-              options={[{ value: 'all', label: '全部工具' }, ...toolSummary.map((t) => ({ value: t.tool, label: t.tool }))]}
+              options={[{ value: 'all', label: t('dash.allTools') }, ...toolSummary.map((t2) => ({ value: t2.tool, label: t2.tool }))]}
             />
             <Button size="small" icon={<DownloadOutlined />} onClick={doExportCsv}>
-              导出 CSV
+              {t('dash.exportCsv')}
             </Button>
           </Space>
         }
@@ -338,7 +340,7 @@ export default function Dashboard({ onGoSettings }: { onGoSettings: () => void }
         />
       </Card>
 
-      <Card size="small" title="项目 TOP10">
+      <Card size="small" title={t('dash.topProjects')}>
         <Table
           size="small"
           rowKey={(r) => r.project}
@@ -346,15 +348,15 @@ export default function Dashboard({ onGoSettings }: { onGoSettings: () => void }
           loading={loading}
           pagination={false}
           columns={[
-            { title: '项目', dataIndex: 'project', key: 'project', ellipsis: true },
-            { title: '会话数', dataIndex: 'sessions', key: 'sessions', width: 100, render: (v: number) => v.toLocaleString() },
-            { title: '消息数', dataIndex: 'msgs', key: 'msgs', width: 100, render: (v: number) => v.toLocaleString() },
+            { title: t('dash.col.project'), dataIndex: 'project', key: 'project', ellipsis: true },
+            { title: t('dash.col.sessions'), dataIndex: 'sessions', key: 'sessions', width: 100, render: (v: number) => v.toLocaleString() },
+            { title: t('dash.col.msgs'), dataIndex: 'msgs', key: 'msgs', width: 100, render: (v: number) => v.toLocaleString() },
           ]}
         />
       </Card>
 
       <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-        Token 用量目前仅有部分工具提供（如 ZCode）；其余工具以会话/消息数统计。 {lastScanAt > 0 && `数据截至 ${dayjs(lastScanAt).format('YYYY-MM-DD HH:mm')} 扫描。`}
+        {t('dash.tokenNote')} {lastScanAt > 0 && t('dash.tokenNoteScan', { time: dayjs(lastScanAt).format('YYYY-MM-DD HH:mm') })}
       </Typography.Text>
     </Space>
   );

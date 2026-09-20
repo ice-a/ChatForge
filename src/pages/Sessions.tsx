@@ -32,6 +32,7 @@ import {
 } from '../lib/db';
 import type { HubMessage, SessionRow } from '../types';
 import { rebuildFtsSession, searchMessages, type FtsHit } from '../lib/fts';
+import { useI18n } from '../i18n';
 import dayjs from 'dayjs';
 
 const ROLE_META: Record<string, { label: string; color: string }> = {
@@ -43,6 +44,7 @@ const ROLE_META: Record<string, { label: string; color: string }> = {
 
 export default function Sessions() {
   const { message, modal } = AntApp.useApp();
+  const { t } = useI18n();
   const { homeDir, dataVersion } = useAppStore();
   const [rows, setRows] = useState<SessionRow[]>([]);
   const [tools, setTools] = useState<ToolSummary[]>([]);
@@ -69,7 +71,7 @@ export default function Sessions() {
       setRows(r);
       setTools(t);
     } catch (e) {
-      message.error(`加载会话失败：${(e as Error).message}`);
+      message.error(t('sess.loadFail', { msg: (e as Error).message }));
     } finally {
       setLoading(false);
     }
@@ -86,7 +88,7 @@ export default function Sessions() {
       const db = await initDb(homeDir);
       setDetail(await getSessionDetail(db, id));
     } catch (e) {
-      message.error((e as Error).message);
+      message.error(t('sess.detailFail', { msg: (e as Error).message }));
     } finally {
       setDetailLoading(false);
     }
@@ -100,7 +102,7 @@ export default function Sessions() {
     if (!detail) return;
     const db = await initDb(homeDir);
     await saveEdit(db, detail.row.id, -1, newTitle);
-    message.success('标题已更新（覆盖层，原文件未改动）');
+    message.success(t('sess.titleUpdated'));
     await load();
     await reloadDetail();
   };
@@ -110,7 +112,7 @@ export default function Sessions() {
     const db = await initDb(homeDir);
     await saveEdit(db, detail.row.id, editing.index, editing.content);
     await rebuildFtsSession(db, detail.row.id).catch(() => undefined);
-    message.success(`消息 #${editing.index} 已更新`);
+    message.success(t('sess.msgUpdated', { n: editing.index }));
     setEditing(null);
     await reloadDetail();
     await load();
@@ -121,7 +123,7 @@ export default function Sessions() {
     const db = await initDb(homeDir);
     await resetEdit(db, detail.row.id, index);
     await rebuildFtsSession(db, detail.row.id).catch(() => undefined);
-    message.success('已还原为原始内容');
+    message.success(t('sess.restored'));
     await reloadDetail();
     await load();
   };
@@ -129,13 +131,13 @@ export default function Sessions() {
   const doResetAll = () => {
     if (!detail) return;
     modal.confirm({
-      title: '还原此会话的全部修改？',
-      content: '将删除该会话的所有编辑覆盖层，恢复为工具原始内容。',
+      title: t('sess.resetConfirmTitle'),
+      content: t('sess.resetConfirmContent'),
       onOk: async () => {
         const db = await initDb(homeDir);
         await resetSessionEdits(db, detail.row.id);
         await rebuildFtsSession(db, detail.row.id).catch(() => undefined);
-        message.success('已全部还原');
+        message.success(t('sess.allReset'));
         await reloadDetail();
         await load();
       },
@@ -152,7 +154,7 @@ export default function Sessions() {
       const db = await initDb(homeDir);
       setFtsHits(await searchMessages(db, q, 80));
     } catch (e) {
-      message.error(`全文搜索失败：${(e as Error).message}`);
+      message.error(t('sess.ftsFail', { msg: (e as Error).message }));
     } finally {
       setFtsLoading(false);
     }
@@ -163,7 +165,7 @@ export default function Sessions() {
   const columns: ColumnsType<SessionRow> = useMemo(
     () => [
       {
-        title: '标题',
+        title: t('sess.col.title'),
         dataIndex: 'title',
         key: 'title',
         ellipsis: { showTitle: false },
@@ -173,12 +175,12 @@ export default function Sessions() {
           </Tooltip>
         ),
       },
-      { title: '工具', dataIndex: 'tool', key: 'tool', width: 100, render: (v: string) => <Tag color="geekblue">{v}</Tag> },
-      { title: '项目', dataIndex: 'project', key: 'project', width: 140, ellipsis: true, render: (v: string | null) => v ?? '—' },
-      { title: '模型', dataIndex: 'model', key: 'model', width: 150, ellipsis: true, render: (v: string | null) => (v ? <Tag>{v}</Tag> : '—') },
-      { title: '消息', dataIndex: 'message_count', key: 'message_count', width: 70, sorter: (a, b) => a.message_count - b.message_count },
+      { title: t('sess.col.tool'), dataIndex: 'tool', key: 'tool', width: 100, render: (v: string) => <Tag color="geekblue">{v}</Tag> },
+      { title: t('sess.col.project'), dataIndex: 'project', key: 'project', width: 140, ellipsis: true, render: (v: string | null) => v ?? '—' },
+      { title: t('sess.col.model'), dataIndex: 'model', key: 'model', width: 150, ellipsis: true, render: (v: string | null) => (v ? <Tag>{v}</Tag> : '—') },
+      { title: t('sess.col.msgs'), dataIndex: 'message_count', key: 'message_count', width: 70, sorter: (a, b) => a.message_count - b.message_count },
       {
-        title: '更新时间',
+        title: t('sess.col.updated'),
         dataIndex: 'updated_at',
         key: 'updated_at',
         width: 140,
@@ -190,7 +192,7 @@ export default function Sessions() {
         title: '',
         key: 'edited',
         width: 60,
-        render: (_: unknown, r: SessionRow) => (Number(r.edited) > 0 ? <Badge status="warning" text={<Typography.Text type="warning" style={{ fontSize: 12 }}>已编辑</Typography.Text>} /> : null),
+        render: (_: unknown, r: SessionRow) => (Number(r.edited) > 0 ? <Badge status="warning" text={<Typography.Text type="warning" style={{ fontSize: 12 }}>{t('sess.edited')}</Typography.Text>} /> : null),
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -208,18 +210,18 @@ export default function Sessions() {
               if (v === 'meta') setFtsHits(null);
             }}
             options={[
-              { value: 'meta', label: '元信息' },
-              { value: 'fulltext', label: '🔍 全文' },
+              { value: 'meta', label: t('sess.meta') },
+              { value: 'fulltext', label: t('sess.fulltext') },
             ]}
           />
           <Select
             value={tool}
             onChange={(v) => setTool(v)}
             style={{ width: 150 }}
-            options={[{ value: 'all', label: '全部工具' }, ...tools.map((t) => ({ value: t.tool, label: `${t.tool} (${t.sessions})` }))]}
+            options={[{ value: 'all', label: t('dash.allTools') }, ...tools.map((t2) => ({ value: t2.tool, label: `${t2.tool} (${t2.sessions})` }))]}
           />
           <Input.Search
-            placeholder={searchMode === 'meta' ? '搜索标题 / 首条提问 / 项目' : '搜索全部消息正文（如：CORS、RAG、报错关键词…）'}
+            placeholder={searchMode === 'meta' ? t('sess.searchMeta') : t('sess.searchFull')}
             allowClear
             style={{ width: 360 }}
             value={searchInput}
@@ -233,9 +235,9 @@ export default function Sessions() {
           <Typography.Text type="secondary">
             {searchMode === 'fulltext'
               ? ftsHits
-                ? `${ftsHits.length} 条命中（按相关度排序）`
-                : '输入关键词回车搜索全部消息内容'
-              : `${rows.length} 个会话`}
+                ? t('sess.hitCount', { n: ftsHits.length })
+                : t('sess.hitHint')
+              : t('sess.sessionCount', { n: rows.length })}
           </Typography.Text>
         </Space>
       </Card>
@@ -249,7 +251,7 @@ export default function Sessions() {
           pagination={{ pageSize: 15, showSizeChanger: false }}
           columns={[
             {
-              title: '会话',
+              title: t('sess.col.session'),
               key: 'session',
               width: 220,
               ellipsis: true,
@@ -260,14 +262,14 @@ export default function Sessions() {
               ),
             },
             {
-              title: '角色',
+              title: t('sess.col.role'),
               dataIndex: 'role',
               key: 'role',
               width: 80,
-              render: (v: string) => <Tag color={ROLE_META[v]?.color ?? 'default'}>{ROLE_META[v]?.label ?? v}</Tag>,
+              render: (v: string) => <Tag color={ROLE_META[v]?.color ?? 'default'}>{ROLE_META[v] ? t(`sess.role.${v}`) : v}</Tag>,
             },
             {
-              title: '命中片段',
+              title: t('sess.col.snippet'),
               dataIndex: 'snippet',
               key: 'snippet',
               render: (v: string) => (
@@ -306,20 +308,20 @@ export default function Sessions() {
               />
             </Space.Compact>
           ) : (
-            '会话详情'
+            t('sess.sessionDetail')
           )
         }
         extra={
           detail && Number(detail.row.edited) > 0 ? (
             <Button size="small" icon={<RedoOutlined />} onClick={doResetAll}>
-              还原全部修改
+              {t('sess.restoreAll')}
             </Button>
           ) : null
         }
         styles={{ body: { padding: 16 } }}
       >
         {detailLoading || !detail ? (
-          <Typography.Text type="secondary">加载中…</Typography.Text>
+          <Typography.Text type="secondary">{t('sess.loading')}</Typography.Text>
         ) : (
           <Space direction="vertical" size="small" style={{ width: '100%' }}>
             <Space wrap size="small">
@@ -327,11 +329,11 @@ export default function Sessions() {
               {detail.row.model && <Tag>{detail.row.model}</Tag>}
               {detail.row.project && <Tag color="purple">{detail.row.project}</Tag>}
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                {detail.messages.length} 条消息 · 更新于 {dayjs(detail.row.updated_at).format('YYYY-MM-DD HH:mm')}
+                {t('sess.msgCount', { n: detail.messages.length })} · {t('sess.col.updated')} {dayjs(detail.row.updated_at).format('YYYY-MM-DD HH:mm')}
               </Typography.Text>
             </Space>
             <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginBottom: 8 }} copyable={{ text: detail.row.source_path }}>
-              来源：{detail.row.source_path}
+              {t('sess.source')}{detail.row.source_path}
             </Typography.Paragraph>
 
             {detail.messages.map((m, i) => {
@@ -347,7 +349,7 @@ export default function Sessions() {
                       <Tag color={meta.color}>{meta.label}</Tag>
                       {m.model && <Typography.Text type="secondary" style={{ fontSize: 12 }}>{m.model}</Typography.Text>}
                       {m.ts && <Typography.Text type="secondary" style={{ fontSize: 12 }}>{dayjs(m.ts).format('MM-DD HH:mm')}</Typography.Text>}
-                      {m.edited && <Tag color="warning">已编辑</Tag>}
+                      {m.edited && <Tag color="warning">{t('sess.editedBadge')}</Tag>}
                     </Space>
                   }
                   extra={
@@ -377,16 +379,16 @@ export default function Sessions() {
       </Drawer>
 
       <Modal
-        title={editing ? `编辑消息 #${editing.index}` : ''}
+        title={editing ? t('sess.editTitle', { n: editing.index }) : ''}
         open={!!editing}
         onCancel={() => setEditing(null)}
         onOk={doSaveEdit}
-        okText="保存"
-        cancelText="取消"
+        okText={t('common.save')}
+        cancelText={t('common.cancel')}
         width={720}
       >
         <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
-          编辑保存在本地覆盖层中，不会修改原工具的会话文件；可随时还原。
+          {t('sess.editHint')}
         </Typography.Text>
         {editing && (
           <Input.TextArea
@@ -398,7 +400,7 @@ export default function Sessions() {
       </Modal>
 
       {rows.length === 0 && !loading && (
-        <Empty description="没有符合条件的会话，请先在顶部「扫描全部来源」" />
+        <Empty description={t('sess.empty')} />
       )}
     </Space>
   );

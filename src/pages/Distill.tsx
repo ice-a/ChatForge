@@ -25,6 +25,7 @@ import {
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useAppStore } from '../store';
+import { useI18n } from '../i18n';
 import { loadProfile } from '../lib/profile';
 import {
   distillRule,
@@ -42,6 +43,7 @@ import dayjs from 'dayjs';
 
 export default function Distill() {
   const { message } = AntApp.useApp();
+  const { t } = useI18n();
   const { homeDir, dataVersion } = useAppStore();
   const [profile, setProfile] = useState<Awaited<ReturnType<typeof loadProfile>>>();
   const [loading, setLoading] = useState(true);
@@ -107,7 +109,7 @@ export default function Distill() {
     setGenerating(true);
     try {
       applySkill(await distillWithLLM(homeDir, buildOpts(), setGenProgress));
-      message.success('蒸馏完成，可编辑后导出');
+      message.success(t('dist.distillDone'));
     } catch (e) {
       message.error((e as Error).message);
     } finally {
@@ -120,7 +122,7 @@ export default function Distill() {
     setGenerating(true);
     try {
       applySkill(await distillRule(homeDir, buildOpts()));
-      message.success('模板蒸馏完成（无 LLM），可编辑后导出');
+      message.success(t('dist.ruleDone'));
     } catch (e) {
       message.error((e as Error).message);
     } finally {
@@ -132,12 +134,12 @@ export default function Distill() {
 
   const doExport = async () => {
     if (!validName) {
-      message.warning('名称需为小写字母开头的 kebab-case（a-z 0-9 -）');
+      message.warning(t('dist.nameWarn'));
       return;
     }
     try {
       const dir = await exportSkill(homeDir, nameInput, contentInput);
-      message.success(`已导出：${dir}\\SKILL.md（把整个 ${nameInput} 文件夹发给对方即可分享）`);
+      message.success(t('dist.exportDone', { dir, name: nameInput }));
     } catch (e) {
       message.error((e as Error).message);
     }
@@ -145,13 +147,13 @@ export default function Distill() {
 
   const doInstall = async (targetId: string, label: string) => {
     if (!validName) {
-      message.warning('名称需为小写字母开头的 kebab-case');
+      message.warning(t('dist.nameWarn2'));
       return;
     }
     const target = INSTALL_TARGETS.find((t) => t.id === targetId)!;
     try {
       const file = await installSkill(homeDir, target, nameInput, contentInput);
-      message.success(`已安装到 ${label}：${file}`);
+      message.success(t('dist.installDone', { label, file }));
     } catch (e) {
       message.error((e as Error).message);
     }
@@ -160,19 +162,19 @@ export default function Distill() {
   const doCopy = async () => {
     try {
       await navigator.clipboard.writeText(contentInput);
-      message.success('SKILL.md 内容已复制到剪贴板');
+      message.success(t('dist.copied'));
     } catch {
-      message.error('复制失败，请手动选择内容复制');
+      message.error(t('dist.copyFail'));
     }
   };
 
   if (loading) return <Spin style={{ display: 'block', margin: '120px auto' }} />;
 
   const evColumns: ColumnsType<SessionRow> = [
-    { title: '标题', dataIndex: 'title', key: 'title', ellipsis: true },
-    { title: '工具', dataIndex: 'tool', key: 'tool', width: 90, render: (v: string) => <Tag>{v}</Tag> },
-    { title: '项目', dataIndex: 'project', key: 'project', width: 130, ellipsis: true, render: (v: string | null) => v ?? '—' },
-    { title: '更新时间', dataIndex: 'updated_at', key: 'updated_at', width: 130, render: (v: number) => dayjs(v).format('MM-DD HH:mm') },
+    { title: t('dist.col.title'), dataIndex: 'title', key: 'title', ellipsis: true },
+    { title: t('dist.col.tool'), dataIndex: 'tool', key: 'tool', width: 90, render: (v: string) => <Tag>{v}</Tag> },
+    { title: t('dist.col.project'), dataIndex: 'project', key: 'project', width: 130, ellipsis: true, render: (v: string | null) => v ?? '—' },
+    { title: t('dist.col.updated'), dataIndex: 'updated_at', key: 'updated_at', width: 130, render: (v: number) => dayjs(v).format('MM-DD HH:mm') },
   ];
 
   return (
@@ -180,17 +182,19 @@ export default function Distill() {
       <Alert
         type="info"
         showIcon
-        message="蒸馏大师：把用户画像 / 智能体记忆 / 会话证据蒸馏成一个符合 skill 规范的 SKILL.md，装进任何 AI 编程工具（ZCode / Claude Code / Codex / OpenCode…），也可以直接把文件夹分享给其他人。"
+        message={t('dist.title')}
       />
 
-      <Card size="small" title="第一步 · 选择蒸馏素材">
+      <Card size="small" title={t('dist.step1')}>
         {memory.length === 0 ? (
           <Typography.Text type="secondary">
-            还没有画像/记忆。请先到「用户画像」页生成画像（记忆条目将出现在这里）。
+            {t('dist.noMem')}
           </Typography.Text>
         ) : (
           <Space direction="vertical" size={4} style={{ width: '100%' }}>
-            <Typography.Text strong>记忆条目（{memSelected.length}/{memory.length} 已选）</Typography.Text>
+            <Typography.Text strong>
+              {t('dist.memories')}（{memSelected.length}/{memory.length} {t('dist.selected')}）
+            </Typography.Text>
             <div style={{ maxHeight: 200, overflow: 'auto', border: '1px solid #f0f0f0', borderRadius: 8, padding: '8px 12px' }}>
               {memory.map((m, i) => (
                 <div key={i}>
@@ -207,13 +211,13 @@ export default function Distill() {
             </div>
             <Space wrap>
               <Checkbox checked={includeTech} onChange={(e) => setIncludeTech(e.target.checked)}>
-                包含技术栈画像
+                {t('dist.includeTech')}
               </Checkbox>
               <Checkbox checked={includeCollab} onChange={(e) => setIncludeCollab(e.target.checked)}>
-                包含协作风格
+                {t('dist.includeCollab')}
               </Checkbox>
               <Button size="small" icon={<FolderOpenOutlined />} onClick={() => setPickOpen(true)}>
-                选择会话证据（{evSelected.length}）
+                {t('dist.pickEvidence', { n: evSelected.length })}
               </Button>
             </Space>
           </Space>
@@ -222,23 +226,23 @@ export default function Distill() {
 
       <Card
         size="small"
-        title="第二步 · 蒸馏"
+        title={t('dist.step2')}
         extra={
           <Space>
             <Button icon={<ThunderboltOutlined />} loading={generating} onClick={genRule}>
-              模板蒸馏（免配置）
+              {t('dist.ruleDistill')}
             </Button>
             <Button type="primary" icon={<RobotOutlined />} loading={generating} onClick={genLLM}>
-              LLM 蒸馏（推荐）
+              {t('dist.llmDistill')}
             </Button>
           </Space>
         }
       >
-        {generating && <Alert type="info" showIcon icon={<Spin size="small" />} message={genProgress || '蒸馏中…'} />}
+        {generating && <Alert type="info" showIcon icon={<Spin size="small" />} message={genProgress || t('dist.distilling')} />}
         {skill && (
           <Form layout="vertical" style={{ marginTop: 8 }}>
             <Space wrap size="middle" align="start">
-              <Form.Item label="Skill 名称（= 目录名，kebab-case）" validateStatus={validName ? undefined : 'error'} style={{ marginBottom: 8 }}>
+              <Form.Item label={t('dist.skillName')} validateStatus={validName ? undefined : 'error'} style={{ marginBottom: 8 }}>
                 <Input
                   style={{ width: 280 }}
                   value={nameInput}
@@ -246,21 +250,21 @@ export default function Distill() {
                   prefix={<ExperimentOutlined />}
                 />
               </Form.Item>
-              <Form.Item label="分享/安装位置" style={{ marginBottom: 8 }}>
+              <Form.Item label={t('dist.installLoc')} style={{ marginBottom: 8 }}>
                 <Typography.Text code style={{ fontSize: 12 }}>
                   ~/.agents/skills/{nameInput || '<name>'}/SKILL.md
                 </Typography.Text>
               </Form.Item>
             </Space>
-            <Form.Item label="description（触发信号，其他工具据此决定何时加载）">
+            <Form.Item label={t('dist.descLabel')}>
               <Input.TextArea rows={2} value={descInput} onChange={(e) => setDescInput(e.target.value)} />
             </Form.Item>
             <Form.Item
               label={
                 <Space>
-                  <span>SKILL.md 正文</span>
+                  <span>{t('dist.bodyLabel')}</span>
                   <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                    规范：frontmatter 仅 name + description；正文祈使句 + 示例，&lt; 500 行
+                    {t('dist.bodyHint')}
                   </Typography.Text>
                 </Space>
               }
@@ -269,28 +273,27 @@ export default function Distill() {
             </Form.Item>
             <Space wrap>
               <Button type="primary" icon={<CloudDownloadOutlined />} onClick={doExport}>
-                导出为可分享文件夹
+                {t('dist.exportFolder')}
               </Button>
               <Button icon={<CopyOutlined />} onClick={doCopy}>
-                复制内容
+                {t('dist.copy')}
               </Button>
-              <Button onClick={() => setInstallOpen(true)}>安装到本机工具…</Button>
+              <Button onClick={() => setInstallOpen(true)}>{t('dist.install')}</Button>
             </Space>
             <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginTop: 8, marginBottom: 0 }}>
-              分享方式：把导出的 <code>{nameInput}/</code> 整个文件夹发给对方，对方放进自己的
-              <code> ~/.agents/skills/</code>（或 <code>~/.zcode/skills/</code>、<code>~/.claude/skills/</code>）即可生效。
+              {t('dist.shareNote', { name: nameInput || '<name>' })}
             </Typography.Paragraph>
           </Form>
         )}
         {!skill && !generating && (
           <Typography.Text type="secondary">
-            选择素材后点「LLM 蒸馏」或「模板蒸馏」。生成后可自由编辑再导出。
+            {t('dist.noSkill')}
           </Typography.Text>
         )}
       </Card>
 
       <Modal
-        title="选择会话证据（蒸馏时会作为素材提供给 LLM）"
+        title={t('dist.pickTitle')}
         open={pickOpen}
         onCancel={() => setPickOpen(false)}
         onOk={() => setPickOpen(false)}
@@ -307,18 +310,18 @@ export default function Distill() {
       </Modal>
 
       <Modal
-        title="安装到本机工具"
+        title={t('dist.installTitle')}
         open={installOpen}
         onCancel={() => setInstallOpen(false)}
         footer={null}
       >
         <Space direction="vertical" size={8} style={{ width: '100%' }}>
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            安装 = 写入 <code>{nameInput}/SKILL.md</code> 到对应目录。同名会覆盖，请确认名称正确。
+            {t('dist.installHint', { name: nameInput || '<name>' })}
           </Typography.Text>
-          {INSTALL_TARGETS.map((t) => (
-            <Button key={t.id} block onClick={() => void doInstall(t.id, t.label)}>
-              安装到 {t.label}
+          {INSTALL_TARGETS.map((tg) => (
+            <Button key={tg.id} block onClick={() => void doInstall(tg.id, tg.label)}>
+              {t('dist.installTo', { label: tg.label })}
             </Button>
           ))}
         </Space>
