@@ -7,6 +7,7 @@ import {
   Card,
   Form,
   Input,
+  Modal,
   Popconfirm,
   Select,
   Slider,
@@ -17,7 +18,7 @@ import {
   Typography,
 } from 'antd';
 import { CheckCircleOutlined, CloseCircleOutlined, DeleteOutlined, PlusOutlined, SyncOutlined } from '@ant-design/icons';
-import { sqliteQuery } from '../bridge/client';
+import { sqliteQuery, fsCopy, fsReadFile, fsWriteFile } from '../bridge/client';
 import { useAppStore } from '../store';
 import { getCustomSources, getLastScanReport, getSourceStatuses, runScan, saveCustomSources, type SourceStatus } from '../lib/scan';
 import { saveLlmConfig, loadLlmConfig } from '../lib/profile';
@@ -54,6 +55,8 @@ export default function Settings() {
   const [presets, setPresets] = useState<ProviderPreset[]>([]);
   const [currentConfigs, setCurrentConfigs] = useState<CurrentConfig[]>([]);
   const [newPreset, setNewPreset] = useState<ProviderPreset>({ id: '', name: '', baseUrl: '', apiKey: '', model: '' });
+  const [restoreOpen, setRestoreOpen] = useState(false);
+  const [restorePath, setRestorePath] = useState('');
   const [llmForm] = Form.useForm<LlmConfig>();
 
   const load = useCallback(async () => {
@@ -163,10 +166,64 @@ export default function Settings() {
     bumpDataVersion();
   };
 
+  // ---------- 备份 / 恢复（跨设备迁移） ----------
+
+  const backupDb = async () => {
+    try {
+      const stamp = dayjs().format('YYYYMMDD-HHmmss');
+      const dest = `${homeDir}/Downloads/chatforge/chatforge-backup-${stamp}.sqlite`.replace(/\//g, '/');
+      await fsCopy(hubPath, dest);
+      message.success(`数据库已备份：${dest}（连同目标机器上的同名文件放到 ~/.ai-session-hub/hub.sqlite 即可迁移）`);
+    } catch (e) {
+      message.error(`备份失败：${(e as Error).message}`);
+    }
+  };
+
+  const restoreDb = async () => {
+    if (!restorePath.trim()) {
+      message.warning('请填写备份文件路径');
+      return;
+    }
+    modal.confirm({
+      title: '用该备份覆盖当前数据库？',
+      content: '当前 hub.sqlite 将先备份为 hub.sqlite.bak-时间戳，然后恢复所选备份。',
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        try {
+          // 先校验备份文件可读
+          await fsReadFile(restorePath.trim(), 1);
+          const bak = `${hubPath}.bak-${Date.now()}`;
+          await fsCopy(hubPath, bak);
+          await fsCopy(restorePath.trim(), hubPath);
+          message.success(`已恢复（原库备份 ${bak.split(/[\\/]/).pop()}），刷新页面生效`);
+        } catch (e) {
+          message.error(`恢复失败：${(e as Error).message}`);
+        }
+      },
+    });
+  };
+
   if (loading) return <Typography.Text type="secondary">加载中…</Typography.Text>;
 
   return (
     <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+      <Modal
+        title="恢复数据库（跨设备迁移）"
+        open={restoreOpen}
+        onCancel={() => setRestoreOpen(false)}
+        onOk={() => void restoreDb()}
+        okText="恢复"
+        okButtonProps={{ danger: true }}
+        cancelText="取消"
+      >
+        <Space direction="vertical" size={8} style={{ width: '100%' }}>
+          <Input placeholder="备份文件绝对路径，如 C:\Users\lee\Downloads\chatforge\chatforge-backup-xxx.sqlite" value={restorePath} onChange={(e) => setRestorePath(e.target.value)} />
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            在另一台机器上「备份数据库」，把生成的 .sqlite 文件拷到本机后在此恢复，会话/编辑/画像/配置全部迁移。
+          </Typography.Text>
+        </Space>
+      </Modal>
+
       <Card size="small" title="会话来源（找不到的工具自动跳过，也可手动指定路径）">
         <Space direction="vertical" size="small" style={{ width: '100%' }}>
           {sources.map((s) => (
@@ -448,6 +505,8 @@ export default function Settings() {
           </Typography.Text>
           <Space wrap style={{ marginTop: 8 }}>
             <Button onClick={() => void exportAll()}>导出全部会话 JSON</Button>
+            <Button onClick={() => void backupDb()}>备份数据库</Button>
+            <Button onClick={() => setRestoreOpen(true)}>恢复数据库…</Button>
             <Button type="primary" ghost onClick={() => window.open('https://github.com/ice-a/ChatForge/releases/latest', '_blank')}>
               检查更新（GitHub Releases）
             </Button>
