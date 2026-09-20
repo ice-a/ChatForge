@@ -1,5 +1,5 @@
 import { getLatestProfile, getSettings, initDb, saveProfile, saveSetting, sampleUserTexts, getToolSummary, getModelUsage, getTopProjects } from './db';
-import { chatLLM, extractJsonLoose } from './llm';
+import { chatLLM, extractJsonLoose, maskSensitive } from './llm';
 import { extractTechStats } from './techstack';
 import type { LlmConfig, UserProfile } from '../types';
 
@@ -49,7 +49,7 @@ export async function generateProfileWithLLM(homeDir: string, cfg: LlmConfig, on
   const user = `${statsBlock}
 
 ## 近期会话抽样（用户输入摘录，共 ${samples.length} 条）
-${samples.join('\n')}
+${samples.map(maskSensitive).join('\n')}
 
 请输出 JSON 画像。`;
 

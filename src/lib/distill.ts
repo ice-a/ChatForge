@@ -1,4 +1,4 @@
-import { chatLLM, extractJsonLoose } from './llm';
+import { chatLLM, extractJsonLoose, maskSensitive } from './llm';
 import { loadLlmConfig, loadProfile } from './profile';
 import { fsWriteFile, pathJoin } from '../bridge/client';
 import { initDb, listSessions } from './db';
@@ -80,7 +80,7 @@ export async function distillWithLLM(
 ${facts.join('\n') || '（无画像，仅依据会话证据）'}
 
 ## 会话证据（用户近期真实提问摘录）
-${opts.sessionEvidence.slice(0, 20).map((s) => `- ${s}`).join('\n') || '（未选择会话）'}
+${opts.sessionEvidence.slice(0, 20).map(maskSensitive).map((s) => `- ${s}`).join('\n') || '（未选择会话）'}
 
 请蒸馏出一个 skill，让任何 AI 编程工具装上后都能更懂这位用户。`;
 

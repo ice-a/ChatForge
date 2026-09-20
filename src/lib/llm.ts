@@ -17,6 +17,26 @@ function normalizeBase(baseUrl: string): string {
   return (baseUrl || '').trim().replace(/\/+$/, '');
 }
 
+/**
+ * 敏感信息脱敏：调用第三方 LLM 前对会话文本打码。
+ * 覆盖常见形态：sk- 开头 key、GitHub/AWS 凭证、Bearer token、
+ * api key/token/secret 赋值、长 hex 与 base64 串。
+ */
+export function maskSensitive(text: string): string {
+  return text
+    .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/g, 'sk-***')
+    .replace(/\b(?:ghp|gho|ghu|ghs)_[A-Za-z0-9]{16,}\b/g, 'gh***')
+    .replace(/\bgithub_pat_[A-Za-z0-9_]{16,}\b/g, 'github_pat_***')
+    .replace(/\bAKIA[0-9A-Z]{12,}\b/g, 'AKIA***')
+    .replace(/\bBearer\s+[A-Za-z0-9._~-]{10,}/gi, 'Bearer ***')
+    .replace(/\b[a-f0-9]{32,}\b/gi, (m) => m.slice(0, 4) + '…***')
+    .replace(/\b[A-Za-z0-9+/]{40,}={0,2}\b/g, (m) => m.slice(0, 4) + '…***')
+    .replace(
+      /\b(api[_-]?key|apikey|access[_-]?token|auth[_-]?token|token|secret|password|passwd|pwd)\b\s*[:=]\s*["']?[^"'\s,;)}]{6,}/gi,
+      '$1=***',
+    );
+}
+
 export interface LlmReply {
   text: string;
   model: string;

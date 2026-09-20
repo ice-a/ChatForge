@@ -15,6 +15,14 @@ export interface ProviderPreset {
 
 export type ProviderTarget = 'claude' | 'codex' | 'gemini';
 
+/** 常见供应商的 Anthropic 兼容端点（Claude Code 直连用），一键填充后只需补 API Key */
+export const PROVIDER_QUICK_PRESETS: { label: string; baseUrl: string; model?: string }[] = [
+  { label: 'DeepSeek（Anthropic 兼容）', baseUrl: 'https://api.deepseek.com/anthropic', model: 'deepseek-chat' },
+  { label: 'Kimi 月之暗面（Anthropic 兼容）', baseUrl: 'https://api.moonshot.cn/anthropic', model: 'kimi-k2-turbo-preview' },
+  { label: '智谱 GLM（Anthropic 兼容）', baseUrl: 'https://open.bigmodel.cn/api/anthropic', model: 'glm-4.6' },
+  { label: '自定义中转站（自填 BaseURL）', baseUrl: '' },
+];
+
 export const TARGET_LABEL: Record<ProviderTarget, string> = {
   claude: 'Claude Code',
   codex: 'Codex CLI',

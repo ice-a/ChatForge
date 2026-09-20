@@ -15,6 +15,7 @@ import {
   type ModelUsage,
 } from '../lib/db';
 import { runScan } from '../lib/scan';
+import { generateRuleProfile } from '../lib/profile';
 import { usageToCsv, exportText } from '../lib/export';
 import { estimateCost, loadPrices } from '../lib/prices';
 import dayjs from 'dayjs';
@@ -206,6 +207,21 @@ export default function Dashboard({ onGoSettings }: { onGoSettings: () => void }
     }
   };
 
+  const scanAndProfile = async () => {
+    setScanning(true);
+    try {
+      const report = await runScan(homeDir, {});
+      await setScanResult(Date.now(), report);
+      const total = report.reduce((a, r) => a + r.sessions, 0);
+      await generateRuleProfile(homeDir);
+      message.success(`已扫描 ${total} 个会话并生成本地画像，去「用户画像」页查看 →`);
+    } catch (e) {
+      message.error((e as Error).message);
+    } finally {
+      setScanning(false);
+    }
+  };
+
   const doExportCsv = async () => {
     const path = await exportText(homeDir, `用量统计-${dayjs().format('YYYYMMDD-HHmmss')}.csv`, usageToCsv(filteredUsage, prices));
     message.success(`已导出：${path}`);
@@ -213,12 +229,17 @@ export default function Dashboard({ onGoSettings }: { onGoSettings: () => void }
 
   if (!loading && total === 0) {
     return (
-      <Empty description="还没有会话数据" style={{ marginTop: 80 }}>
-        <Space>
-          <Button type="primary" icon={<SyncOutlined />} loading={scanning} onClick={rescan}>
-            立即扫描
-          </Button>
-          <Button onClick={onGoSettings}>配置会话来源</Button>
+      <Empty description="还没有会话数据，三步开始：扫描 → 生成画像 → 蒸馏 Skill" style={{ marginTop: 80 }}>
+        <Space direction="vertical" size="middle">
+          <Space>
+            <Button type="primary" icon={<SyncOutlined />} loading={scanning} onClick={scanAndProfile}>
+              一键扫描并生成画像（推荐）
+            </Button>
+            <Button onClick={onGoSettings}>配置会话来源</Button>
+          </Space>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            支持的 18 个工具没装也没关系：自动探测，找不到就跳过，之后可在设置里手动指定路径。
+          </Typography.Text>
         </Space>
       </Empty>
     );

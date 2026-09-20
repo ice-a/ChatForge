@@ -47,6 +47,23 @@ export default function App() {
     void initData();
   }, [initData]);
 
+  // 后台自动增量扫描：距上次扫描超过 4 小时（或从未扫描）时静默执行一次，每会话仅触发一次
+  useEffect(() => {
+    if (!initDone || !homeDir || initError) return;
+    if (sessionStorage.getItem('chatforge.autoscanned')) return;
+    const stale = lastScanAt === 0 || Date.now() - lastScanAt > 4 * 3600_000;
+    if (!stale) return;
+    sessionStorage.setItem('chatforge.autoscanned', '1');
+    void (async () => {
+      try {
+        const report = await runScan(homeDir, {});
+        await setScanResult(Date.now(), report);
+      } catch {
+        /* 静默失败，用户可手动扫描 */
+      }
+    })();
+  }, [initDone, homeDir, initError, lastScanAt, setScanResult]);
+
   const startScan = async () => {
     if (!homeDir) return;
     setScanning(true);

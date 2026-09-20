@@ -27,6 +27,7 @@ import { DEFAULT_PRICES, loadPrices, savePrices, type ModelPrice } from '../lib/
 import {
   applyProvider,
   loadPresets,
+  PROVIDER_QUICK_PRESETS,
   readCurrentConfigs,
   savePresets,
   TARGET_LABEL,
@@ -352,6 +353,17 @@ export default function Settings() {
           ]}
         />
         <Space wrap style={{ marginTop: 12 }}>
+          <Select
+            size="small"
+            style={{ width: 220 }}
+            placeholder="⚡ 快速填充供应商"
+            value={null}
+            onChange={(label) => {
+              const p = PROVIDER_QUICK_PRESETS.find((x) => x.label === label);
+              if (p) setNewPreset({ ...newPreset, name: p.label.replace(/（.*）/, ''), baseUrl: p.baseUrl, model: p.model ?? '' });
+            }}
+            options={PROVIDER_QUICK_PRESETS.map((p) => ({ value: p.label, label: p.label }))}
+          />
           <Input size="small" style={{ width: 130 }} placeholder="预设名称" value={newPreset.name} onChange={(e) => setNewPreset({ ...newPreset, name: e.target.value })} />
           <Input size="small" style={{ width: 300 }} placeholder="BaseURL，如 https://api.deepseek.com" value={newPreset.baseUrl} onChange={(e) => setNewPreset({ ...newPreset, baseUrl: e.target.value })} />
           <Input.Password size="small" style={{ width: 220 }} placeholder="API Key" value={newPreset.apiKey} onChange={(e) => setNewPreset({ ...newPreset, apiKey: e.target.value })} autoComplete="new-password" />
