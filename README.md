@@ -27,11 +27,13 @@
 
 | 车间 | 能干什么 |
 | --- | --- |
-| 📊 仪表盘 | 会话/消息/Token 总量、工具占比饼图、模型用量 TOP10、30 天趋势、24 小时活跃分布、**工具×模型动态表格**（排序/筛选/CSV 导出） |
-| 🗃️ 会话库 | 按工具/关键词检索；查看完整对话；**编辑任意消息与标题**（覆盖层机制，可单条/整会话还原，原文件永不改动） |
-| 👤 用户画像 | 规则版（免配置开箱即用）+ LLM 深度画像：能力雷达、多维评估、技术栈图谱、工作习惯、协作风格、**智能体记忆条目**；导出 Markdown / JSON / `AGENTS.md` / `CLAUDE.md` |
-| ⚗️ 蒸馏大师 | 画像 + 记忆 + 会话证据 → **蒸馏成符合 skill 规范的 `SKILL.md`**（kebab-case + 触发式 description），一键分享文件夹 / 安装到 `~/.agents/skills/` 等目录，别人放进自己工具的 skills 目录即用 |
-| ⚙️ 设置 | 每个工具独立开关、默认路径展示、**自定义路径**（没装的工具自动跳过）、自定义来源（未知格式目录 + 6 种解析器）、第三方大模型配置与测试连接 |
+| 📊 仪表盘 | 会话/消息/Token/**估算成本** 总量、工具占比、模型用量 TOP10、30 天趋势、24 小时活跃分布、**工具×模型动态表格**（排序/筛选/成本列/CSV 导出）、空状态一键「扫描并生成画像」 |
+| 🗃️ 会话库 | 按工具/关键词检索 + **🔍 FTS5 全文搜索**（中文子串、相关度排序、点击直达会话）；查看完整对话；**编辑任意消息与标题**（覆盖层，可还原，原文件永不改动） |
+| 👤 用户画像 | 规则版（免配置）+ LLM 深度画像（**调用前自动脱敏 API Key**）：能力雷达、多维评估、技术栈图谱、工作习惯、协作风格、智能体记忆；导出 Markdown / JSON / `AGENTS.md` / `CLAUDE.md` / **写入项目目录（记忆回写，AI 工具立即生效）** / **社交分享卡片 PNG** |
+| ⚗️ 蒸馏大师 | 画像 + 记忆 + 会话证据 → **蒸馏成符合 skill 规范的 `SKILL.md`**，一键分享文件夹 / 安装到 `~/.agents/skills/` 等目录，别人放进自己工具的 skills 目录即用 |
+| ⚙️ 设置 | **18 个工具适配器**（ZCode / Claude Code / Codex / Copilot Chat / Cursor / Windsurf / Trae / OpenCode / Gemini / Qwen / Cline / Roo Code / CodeBuddy / CherryStudio / Aider / pi / mimo / dsh），默认路径自动探测、找不到跳过、可手动指定；**供应商切换器**（对标 cc-switch：Claude Code / Codex / Gemini 一键切换 API 供应商，内置 DeepSeek/Kimi/GLM 兼容端点，自动备份）；模型价格表编辑；数据库备份/恢复（跨设备迁移）；检查更新 |
+
+**省心细节**：启动时距上次扫描超 4 小时自动后台增量扫描；所有原始会话文件只读；API Key 仅存本机。
 
 ## 📥 下载安装
 
@@ -86,17 +88,24 @@ pnpm tauri dev      # 桌面应用模式开发调试
 | 导出（画像 / AGENTS.md / CSV / Skill） | `~/Downloads/chatforge/` |
 | Skill 安装位置 | `~/.agents/skills/<name>/`（跨工具标准）、`~/.zcode/skills/`、`~/.claude/skills/` |
 
-## 🔌 会话来源（默认探测路径，均可在设置中覆盖）
+## 🔌 会话来源（18 个适配器，默认探测路径，均可在设置中覆盖）
 
 | 工具 | 路径 | 格式 |
 | --- | --- | --- |
 | ZCode | `~/.zcode/cli/db/db.sqlite` | SQLite（含 token 统计） |
 | Claude Code | `~/.claude/projects/**/*.jsonl` | JSONL |
 | Codex CLI | `~/.codex/sessions/**/*.jsonl` | JSONL（rollout） |
+| Copilot Chat | VSCode `workspaceStorage/*/chatSessions/*.jsonl` | JSONL |
+| Cursor | `Cursor/User/globalStorage/state.vscdb` | SQLite（chatdata + composerData） |
+| Windsurf / Trae | 各自 `User/workspaceStorage/*/chatSessions/` + `state.vscdb` | JSONL / SQLite |
 | OpenCode | `~/.local/share/opencode/storage`（Win: `~/AppData/Local/opencode/storage`） | storage JSON |
 | Gemini CLI | `~/.gemini/tmp/**/chats/*.json` | JSON |
 | Qwen Code | `~/.qwen/tmp/**/chats/*.json` | JSON |
 | Cline | `~/.cline/data/db/sessions.db` + VSCode globalStorage 任务目录 | SQLite / JSON |
+| Roo Code | VSCode `globalStorage/rooveterinaryinc.roo-cline/tasks/*/ui_messages.json` | JSON |
+| CodeBuddy | `~/.codebuddy/history.jsonl` | JSONL（按项目聚合） |
+| CherryStudio | `AppData/Roaming/CherryStudio/Data/cherrystudio.sqlite` | SQLite |
+| Aider | `~/.aider.chat.history.md` | Markdown |
 | pi | `~/.pi/agent/sessions/**/*.jsonl` | JSONL（启发式） |
 | mimo / dsh | `~/.mimo`、`~/.dsh` | 未知格式 → 通用启发式（建议设置里手动指定路径） |
 | 任意来源 | 设置 → 自定义来源 | 6 种解析器可选 |
